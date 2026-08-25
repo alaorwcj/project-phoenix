@@ -4,13 +4,16 @@ import (
 	"context"
 	"io"
 	pb "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen"
+	"github.com/alaorwcj/project-phoenix/agent/internal/metrics"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"time"
 )
 
 type Client struct {
-	cli *client.Client
+	cli     *client.Client
+	metrics *metrics.Registry
 }
 
 type ContainerConfig struct {
@@ -29,12 +32,12 @@ type LogsOptions struct {
 	Stderr bool
 }
 
-func NewClient(host string) (*Client, error) {
+func NewClient(host string, reg *metrics.Registry) (*Client, error) {
 	cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
-	return &Client{cli: cli}, nil
+	return &Client{cli: cli, metrics: reg}, nil
 }
 
 func (c *Client) GetInfo(ctx context.Context) (types.Info, error) {
@@ -47,6 +50,12 @@ func (c *Client) ListContainers(ctx context.Context) ([]types.Container, error) 
 
 // GetMetrics returns host metrics in the gRPC message format
 func (c *Client) GetMetrics(ctx context.Context) *pb.HostMetrics {
+	start := time.Now()
+	defer func() {
+		if c.metrics != nil {
+			c.metrics.ObserveDuration("docker_metrics_collection_duration_seconds", nil, time.Since(start))
+		}
+	}()
 	info, _ := c.cli.Info(ctx)
 	return &pb.HostMetrics{
 		CPUPercent:        float64(info.NCPU),

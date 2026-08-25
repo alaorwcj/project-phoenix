@@ -1,5 +1,8 @@
 import Queue, { Queue as BullQueue, Job, JobOptions } from 'bull';
 import { env } from '../config/env';
+import { getLogger } from './logger';
+import { observeJobCompleted, observeJobEnqueued, observeJobFailed } from './metrics';
+import { createTraceId } from './trace';
 
 export enum JobType {
   CONTAINER_START = 'container:start',
@@ -32,6 +35,7 @@ export interface ImagePullJobData {
 }
 
 export type JobData = ContainerStartJobData | ContainerStopJobData | ImagePullJobData;
+type TraceAwareJobOptions = JobOptions & { traceId?: string };
 
 export interface JobStatus {
   id: string;
@@ -72,15 +76,26 @@ class JobQueueManager {
 
       // Event listeners
       queue.on('active', (job: Job) => {
-        console.log(`[${jobType}] Job ${job.id} started processing`);
+        getLogger({ component: 'job-queue', jobType, traceId: getJobTraceId(job) }).info(
+          { jobId: job.id },
+          'Job started processing'
+        );
       });
 
       queue.on('completed', (job: Job) => {
-        console.log(`[${jobType}] Job ${job.id} completed`, job.returnvalue);
+        observeJobCompleted(jobType);
+        getLogger({ component: 'job-queue', jobType, traceId: getJobTraceId(job) }).info(
+          { jobId: job.id, result: job.returnvalue },
+          'Job completed'
+        );
       });
 
       queue.on('failed', (job: Job, err: Error) => {
-        console.error(`[${jobType}] Job ${job.id} failed:`, err.message);
+        observeJobFailed(jobType);
+        getLogger({ component: 'job-queue', jobType, traceId: getJobTraceId(job) }).error(
+          { jobId: job.id, err },
+          'Job failed'
+        );
       });
 
       this.queues.set(jobType, queue);
@@ -90,17 +105,21 @@ class JobQueueManager {
   async enqueueJob<T extends JobData>(
     jobType: JobType,
     data: T,
-    options?: JobOptions
+    options?: JobOptions & { traceId?: string }
   ): Promise<Job<T>> {
     const queue = this.queues.get(jobType);
     if (!queue) {
       throw new Error(`Queue not initialized for job type: ${jobType}`);
     }
 
-    return queue.add(data, {
+    const job = await queue.add(data, {
       ...options,
       jobId: `${jobType}-${data.tenantId}-${Date.now()}`,
-    });
+      traceId: ((options as TraceAwareJobOptions | undefined)?.traceId as string | undefined) ?? createTraceId(),
+    } as TraceAwareJobOptions);
+
+    observeJobEnqueued(jobType);
+    return job;
   }
 
   getQueue(jobType: JobType): BullQueue | undefined {
@@ -187,6 +206,13 @@ export async function initializeJobQueue(): Promise<JobQueueManager> {
   return jobQueueManager;
 }
 
+export async function closeJobQueue(): Promise<void> {
+  if (jobQueueManager) {
+    await jobQueueManager.closeQueues();
+    jobQueueManager = undefined;
+  }
+}
+
 export function getJobQueue(): JobQueueManager {
   if (!jobQueueManager) {
     throw new Error('Job queue not initialized. Call initializeJobQueue() first.');
@@ -195,3 +221,11 @@ export function getJobQueue(): JobQueueManager {
 }
 
 export default JobQueueManager;
+
+function getJobTraceId(job: Job) {
+  const traceId = (job.opts as Record<string, unknown>).traceId;
+  if (typeof traceId === 'string' && traceId.trim()) {
+    return traceId.trim();
+  }
+  return createTraceId();
+}

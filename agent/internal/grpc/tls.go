@@ -5,8 +5,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
-	"log"
 
+	"github.com/alaorwcj/project-phoenix/agent/internal/logging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -19,7 +19,7 @@ type TLSConfig struct {
 }
 
 // LoadClientCredentials loads mTLS credentials for gRPC client
-func LoadClientCredentials(tlsConfig *TLSConfig) (grpc.DialOption, error) {
+func LoadClientCredentials(tlsConfig *TLSConfig, log logging.Logger) (grpc.DialOption, error) {
 	if !tlsConfig.Enabled {
 		return grpc.WithInsecure(), nil
 	}
@@ -48,12 +48,12 @@ func LoadClientCredentials(tlsConfig *TLSConfig) (grpc.DialOption, error) {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})
 
-	log.Printf("mTLS enabled: client cert=%s, key=%s, ca=%s", tlsConfig.CertPath, tlsConfig.KeyPath, tlsConfig.CAPath)
+	log.Info("mTLS enabled for gRPC client", "cert", tlsConfig.CertPath, "key", tlsConfig.KeyPath, "ca", tlsConfig.CAPath)
 	return grpc.WithTransportCredentials(tlsCreds), nil
 }
 
 // LoadServerCredentials loads mTLS credentials for gRPC server
-func LoadServerCredentials(tlsConfig *TLSConfig) (credentials.TransportCredentials, error) {
+func LoadServerCredentials(tlsConfig *TLSConfig, log logging.Logger) (credentials.TransportCredentials, error) {
 	if !tlsConfig.Enabled {
 		return nil, nil // Will use insecure
 	}
@@ -82,6 +82,6 @@ func LoadServerCredentials(tlsConfig *TLSConfig) (credentials.TransportCredentia
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 	})
 
-	log.Printf("mTLS enabled: server cert=%s, key=%s, ca=%s", tlsConfig.CertPath, tlsConfig.KeyPath, tlsConfig.CAPath)
+	log.Info("mTLS enabled for gRPC server", "cert", tlsConfig.CertPath, "key", tlsConfig.KeyPath, "ca", tlsConfig.CAPath)
 	return tlsCreds, nil
 }

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { getJobQueue, JobType } from '../lib/jobQueue';
+import { type StructuredLogger } from '../lib/logger';
 
 export async function getJobStatusHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -19,7 +20,7 @@ export async function getJobStatusHandler(request: FastifyRequest, reply: Fastif
 
     return reply.status(200).send(status);
   } catch (error) {
-    console.error('Error getting job status:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error getting job status');
     return reply.status(500).send({ error: (error as Error).message });
   }
 }
@@ -53,7 +54,7 @@ export async function listJobsHandler(request: FastifyRequest, reply: FastifyRep
       total: jobStatuses.length,
     });
   } catch (error) {
-    console.error('Error listing jobs:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error listing jobs');
     return reply.status(500).send({ error: (error as Error).message });
   }
 }
@@ -77,7 +78,7 @@ export async function retryJobHandler(request: FastifyRequest, reply: FastifyRep
       job: status,
     });
   } catch (error) {
-    console.error('Error retrying job:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error retrying job');
 
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Job not found' });
@@ -104,7 +105,7 @@ export async function cancelJobHandler(request: FastifyRequest, reply: FastifyRe
       jobId,
     });
   } catch (error) {
-    console.error('Error cancelling job:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error cancelling job');
 
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Job not found' });

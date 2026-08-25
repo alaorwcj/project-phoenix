@@ -9,9 +9,11 @@ type Config struct {
 	ControlPlaneAddr  string
 	AgentID           string
 	Hostname          string
+	TraceID           string
 	DockerHost        string
 	HeartbeatInterval int
 	Port              string
+	MetricsPort       string
 	// TLS/mTLS Configuration
 	TLSEnabled   bool
 	TLSCertPath  string
@@ -20,13 +22,16 @@ type Config struct {
 }
 
 func Load() *Config {
+	hostname, _ := os.Hostname()
 	return &Config{
 		ControlPlaneAddr:  getEnv("CONTROL_PLANE_ADDR", "localhost:50051"),
 		AgentID:           getEnv("AGENT_ID", ""),
-		Hostname:          getEnv("HOSTNAME", os.Hostname()),
+		Hostname:          getEnv("HOSTNAME", hostname),
+		TraceID:           getEnv("TRACE_ID", ""),
 		DockerHost:        getEnv("DOCKER_HOST", "unix:///var/run/docker.sock"),
 		HeartbeatInterval: getEnvInt("HEARTBEAT_INTERVAL", 30),
 		Port:              getEnv("PORT", "9000"),
+		MetricsPort:       getEnv("METRICS_PORT", ""),
 		// TLS/mTLS
 		TLSEnabled:  getEnvBool("TLS_ENABLED", false),
 		TLSCertPath: getEnv("TLS_CERT_PATH", ""),

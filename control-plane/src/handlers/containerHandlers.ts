@@ -2,6 +2,8 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { createContainerService } from '../services/containerService';
 import { getJobQueue, JobType, ContainerStartJobData, ContainerStopJobData } from '../lib/jobQueue';
 import { PrismaClient } from '@prisma/client';
+import { type StructuredLogger } from '../lib/logger';
+import { getRequestTraceId } from '../lib/trace';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -44,6 +46,7 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_START, jobData, {
       priority: 5,
       delay: 1000, // Give DB a moment to settle
+      traceId: getRequestTraceId(request as unknown as object),
     });
 
     return reply.status(201).send({
@@ -52,7 +55,7 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       jobStatus: 'queued',
     });
   } catch (error) {
-    console.error('Error starting container:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error starting container');
     return reply.status(500).send({ error: (error as Error).message || 'Failed to start container' });
   }
 }
@@ -91,6 +94,7 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
 
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_STOP, jobData, {
       priority: 5,
+      traceId: getRequestTraceId(request as unknown as object),
     });
 
     return reply.status(200).send({
@@ -99,7 +103,7 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
       jobStatus: 'queued',
     });
   } catch (error) {
-    console.error('Error stopping container:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error stopping container');
 
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Container not found' });
@@ -121,7 +125,7 @@ export async function getContainerHandler(request: FastifyRequest, reply: Fastif
     const container = await containerService.getContainer(tenantId, id);
     return reply.status(200).send(container);
   } catch (error) {
-    console.error('Error getting container:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error getting container');
     
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Container not found' });
@@ -158,7 +162,7 @@ export async function listContainersHandler(request: FastifyRequest, reply: Fast
       total: containers.length,
     });
   } catch (error) {
-    console.error('Error listing containers:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error listing containers');
     return reply.status(500).send({ error: (error as Error).message || 'Failed to list containers' });
   }
 }
