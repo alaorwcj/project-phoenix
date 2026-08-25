@@ -17,6 +17,8 @@ const envSchema = z.object({
   TLS_CERT_PATH: z.string().optional(),
   TLS_KEY_PATH: z.string().optional(),
   TLS_CA_PATH: z.string().optional(),
+  // Secrets encryption
+  ENCRYPTION_KEY: z.string().optional(), // 64 hex chars = 32 bytes AES-256 key
 });
 
 export const env = envSchema.parse(process.env);

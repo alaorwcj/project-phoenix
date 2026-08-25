@@ -4,23 +4,35 @@ import { getJobQueue, JobType, ContainerStartJobData, ContainerStopJobData } fro
 import { PrismaClient } from '@prisma/client';
 import { type StructuredLogger } from '../lib/logger';
 import { getRequestTraceId } from '../lib/trace';
+import { validateBody, StartContainerSchema, StopContainerSchema } from '../lib/validation';
+import { checkRateLimit, RATE_LIMITS } from '../lib/rateLimit';
+import { writeAuditLog } from '../lib/audit';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
 
 export async function startContainerHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const { tenantId } = request.user as any;
-    
+    const { tenantId, id: userId } = request.user as any;
+
     if (!request.body) {
       return reply.status(400).send({ error: 'Request body required' });
     }
 
-    const { name, image, hostId, environmentVars, resourceLimits, portBindings } = request.body as any;
-
-    if (!name || !image || !hostId) {
-      return reply.status(400).send({ error: 'Missing required fields: name, image, hostId' });
+    // Rate limit check
+    const rl = checkRateLimit('tenant:container-ops:' + tenantId, RATE_LIMITS.CONTAINER_OPS);
+    if (!rl.allowed) {
+      reply.header('Retry-After', Math.ceil((rl.retryAfterMs ?? 60000) / 1000).toString());
+      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfterMs: rl.retryAfterMs });
     }
+
+    // Validate input
+    const validation = validateBody(StartContainerSchema, request.body);
+    if ('error' in validation) {
+      return reply.status(400).send({ error: validation.error });
+    }
+
+    const { name, image, hostId, environmentVars, resourceLimits, portBindings } = validation.data;
 
     // Create container in PENDING state
     const container = await containerService.startContainer(tenantId, {
@@ -28,8 +40,8 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       image,
       hostId,
       environmentVars: environmentVars || {},
-      resourceLimits: resourceLimits || {},
-      portBindings: portBindings || {},
+      resourceLimits: (resourceLimits || {}) as any,
+      portBindings: (portBindings || {}) as any,
     });
 
     // Enqueue job to handle actual container creation
@@ -40,7 +52,7 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       hostId,
       image,
       environmentVars: environmentVars || {},
-      resourceLimits: resourceLimits || {},
+      resourceLimits: (resourceLimits || {}) as any,
     };
 
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_START, jobData, {
@@ -49,33 +61,62 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       traceId: getRequestTraceId(request as unknown as object),
     });
 
+    await writeAuditLog({
+      tenantId,
+      userId,
+      action: 'CONTAINER_START',
+      resource: 'container',
+      resourceId: container.id,
+      metadata: { name, image, hostId, jobId: job.id },
+      result: 'success',
+    });
+
     return reply.status(201).send({
       ...container,
       jobId: job.id,
       jobStatus: 'queued',
     });
   } catch (error) {
+    const { tenantId, id: userId } = (request.user as any) ?? {};
     (request.log as unknown as StructuredLogger).error({ err: error }, 'Error starting container');
+    await writeAuditLog({
+      tenantId: tenantId ?? 'unknown',
+      userId,
+      action: 'CONTAINER_START',
+      resource: 'container',
+      metadata: { error: (error as Error).message },
+      result: 'failure',
+      error: (error as Error).message,
+    });
     return reply.status(500).send({ error: (error as Error).message || 'Failed to start container' });
   }
 }
 
 export async function stopContainerHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const { tenantId } = request.user as any;
-    
+    const { tenantId, id: userId } = request.user as any;
+
     if (!request.body) {
       return reply.status(400).send({ error: 'Request body required' });
     }
 
-    const { containerId, timeoutSeconds } = request.body as any;
-
-    if (!containerId) {
-      return reply.status(400).send({ error: 'Missing required field: containerId' });
+    // Rate limit check
+    const rl = checkRateLimit('tenant:container-ops:' + tenantId, RATE_LIMITS.CONTAINER_OPS);
+    if (!rl.allowed) {
+      reply.header('Retry-After', Math.ceil((rl.retryAfterMs ?? 60000) / 1000).toString());
+      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfterMs: rl.retryAfterMs });
     }
 
+    // Validate input
+    const validation = validateBody(StopContainerSchema, request.body);
+    if ('error' in validation) {
+      return reply.status(400).send({ error: validation.error });
+    }
+
+    const { containerId, timeoutSeconds } = validation.data;
+
     // Verify container belongs to tenant and get current state
-    const container = await containerService.getContainer(tenantId, containerId);
+    await containerService.getContainer(tenantId, containerId);
 
     // Update to STOPPING immediately for UI feedback
     const stoppingContainer = await containerService.updateContainerStatus(
@@ -97,13 +138,34 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
       traceId: getRequestTraceId(request as unknown as object),
     });
 
+    await writeAuditLog({
+      tenantId,
+      userId,
+      action: 'CONTAINER_STOP',
+      resource: 'container',
+      resourceId: containerId,
+      metadata: { timeoutSeconds: timeoutSeconds || 15, jobId: job.id },
+      result: 'success',
+    });
+
     return reply.status(200).send({
       ...stoppingContainer,
       jobId: job.id,
       jobStatus: 'queued',
     });
   } catch (error) {
+    const { tenantId, id: userId } = (request.user as any) ?? {};
     (request.log as unknown as StructuredLogger).error({ err: error }, 'Error stopping container');
+
+    await writeAuditLog({
+      tenantId: tenantId ?? 'unknown',
+      userId,
+      action: 'CONTAINER_STOP',
+      resource: 'container',
+      metadata: { error: (error as Error).message },
+      result: 'failure',
+      error: (error as Error).message,
+    });
 
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Container not found' });
