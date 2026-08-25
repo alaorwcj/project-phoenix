@@ -2,6 +2,17 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
 import { hostAgentRepository } from '../repositories/hostAgentRepository';
+import type {
+  RegisterHostRequest,
+  RegisterHostResponse,
+  HeartbeatRequest,
+  HeartbeatResponse,
+  StartContainerRequest,
+  StopContainerRequest,
+  ContainerActionResponse,
+  GetContainerLogsRequest,
+  ContainerLogEntry,
+} from '../proto/docker_platform';
 
 const PROTO_PATH = path.join(__dirname, '../../proto/docker_platform.proto');
 

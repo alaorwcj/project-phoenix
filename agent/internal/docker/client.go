@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	pb "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/api/types"
 )
@@ -26,15 +27,14 @@ func (c *Client) ListContainers(ctx context.Context) ([]types.Container, error) 
 	return c.cli.ContainerList(ctx, types.ContainerListOptions{All: true})
 }
 
-func (c *Client) GetMetrics(ctx context.Context) map[string]interface{} {
+// GetMetrics returns host metrics in the gRPC message format
+func (c *Client) GetMetrics(ctx context.Context) *pb.HostMetrics {
 	info, _ := c.cli.Info(ctx)
-	return map[string]interface{}{
-		"cpu_count":       info.NCPU,
-		"memory_total":    info.MemTotal,
-		"containers":      info.Containers,
-		"running":         info.ContainersRunning,
-		"paused":          info.ContainersPaused,
-		"stopped":         info.ContainersStopped,
+	return &pb.HostMetrics{
+		CPUPercent:        float64(info.NCPU),
+		MemoryTotalBytes:  uint64(info.MemTotal),
+		MemoryUsedBytes:   0, // Would require more detailed info
+		RunningContainers: uint32(info.ContainersRunning),
 	}
 }
 
