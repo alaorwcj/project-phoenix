@@ -4,6 +4,7 @@ import { requireRole } from '../middleware/rbac';
 import { listTenantsHandler, getTenantHandler, createTenantHandler } from '../handlers/tenantHandlers';
 import { listEnvironmentsHandler, getEnvironmentHandler, createEnvironmentHandler } from '../handlers/environmentHandlers';
 import { listHostsHandler, getHostHandler, registerHostHandler } from '../handlers/hostHandlers';
+import { startContainerHandler, stopContainerHandler, getContainerHandler, listContainersHandler } from '../handlers/containerHandlers';
 import { UserRole } from '@prisma/client';
 
 export async function setupRoutes(app: FastifyInstance) {
@@ -20,4 +21,9 @@ export async function setupRoutes(app: FastifyInstance) {
   app.get('/api/hosts', { onRequest: authenticate }, listHostsHandler);
   app.get<{ Params: { id: string } }>('/api/hosts/:id', { onRequest: authenticate }, getHostHandler);
   app.post<{ Body: { name: string; hostname: string; agentId?: string; metadata?: object } }>('/api/hosts', { onRequest: authenticate, preHandler: requireRole(UserRole.ADMIN, UserRole.OPERATOR) }, registerHostHandler);
+
+  app.post('/api/containers/start', { onRequest: authenticate, preHandler: requireRole(UserRole.OPERATOR) }, startContainerHandler);
+  app.post('/api/containers/stop', { onRequest: authenticate, preHandler: requireRole(UserRole.OPERATOR) }, stopContainerHandler);
+  app.get<{ Params: { id: string } }>('/api/containers/:id', { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) }, getContainerHandler);
+  app.get('/api/containers', { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) }, listContainersHandler);
 }

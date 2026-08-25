@@ -26,6 +26,23 @@ enum HostStatus {
   DECOMMISSIONED
 }
 
+enum ContainerStatus {
+  PENDING
+  CREATING
+  RUNNING
+  STOPPING
+  STOPPED
+  FAILED
+  UNKNOWN
+}
+
+enum ContainerRestartPolicy {
+  NO
+  ALWAYS
+  ON_FAILURE
+  UNLESS_STOPPED
+}
+
 model Tenant {
   id           String        @id @default(uuid()) @db.Uuid
   name         String
@@ -36,6 +53,7 @@ model Tenant {
   users        User[]
   environments Environment[]
   hosts        Host[]
+  containers   Container[]
 
   @@map("tenants")
 }
@@ -85,8 +103,53 @@ model Host {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
   tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  containers   Container[]
 
   @@unique([tenantId, hostname])
   @@index([tenantId])
   @@map("hosts")
+}
+
+model Container {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @map("tenant_id") @db.Uuid
+  hostId          String                 @map("host_id") @db.Uuid
+  dockerId        String                 @map("docker_id")
+  name            String
+  image           String
+  status          ContainerStatus        @default(PENDING)
+  restartPolicy   ContainerRestartPolicy @default(NO)
+  environmentVars Json?                  @map("environment_vars")
+  resourceLimits  Json?                  @map("resource_limits")
+  portBindings    Json?                  @map("port_bindings")
+  metadata        Json?
+  createdAt       DateTime               @default(now()) @map("created_at")
+  startedAt       DateTime?              @map("started_at")
+  stoppedAt       DateTime?              @map("stopped_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  host   Host   @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, dockerId])
+  @@unique([tenantId, hostId, name])
+  @@index([tenantId])
+  @@index([hostId])
+  @@index([status])
+  @@map("containers")
+}
+
+model ContainerLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  containerId  String   @map("container_id") @db.Uuid
+  stream       String   // stdout, stderr
+  data         Bytes
+  timestamp    DateTime @default(now())
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([containerId])
+  @@index([timestamp])
+  @@map("container_logs")
 }
