@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package dockerplatform.v1;
+
+option go_package = "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen;grpcgen";
+
+import "google/protobuf/timestamp.proto";
+
+service HostAgentService {
+  rpc RegisterHost(RegisterHostRequest) returns (RegisterHostResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc StartContainer(StartContainerRequest) returns (ContainerActionResponse);
+  rpc StopContainer(StopContainerRequest) returns (ContainerActionResponse);
+  rpc GetContainerLogs(GetContainerLogsRequest) returns (stream ContainerLogEntry);
+}
+
+message RegisterHostRequest {
+  string agent_id = 1;
+  string hostname = 2;
+  string docker_version = 3;
+  string operating_system = 4;
+  string architecture = 5;
+  map<string, string> labels = 6;
+}
+
+message RegisterHostResponse {
+  string host_id = 1;
+  string tenant_id = 2;
+  bool accepted = 3;
+  string message = 4;
+}
+
+message HeartbeatRequest {
+  string host_id = 1;
+  string agent_id = 2;
+  HostMetrics metrics = 3;
+  google.protobuf.Timestamp observed_at = 4;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+  google.protobuf.Timestamp server_time = 2;
+  repeated AgentCommand pending_commands = 3;
+}
+
+message HostMetrics {
+  double cpu_percent = 1;
+  uint64 memory_used_bytes = 2;
+  uint64 memory_total_bytes = 3;
+  uint64 disk_used_bytes = 4;
+  uint64 disk_total_bytes = 5;
+  uint32 running_containers = 6;
+}
+
+message AgentCommand {
+  string command_id = 1;
+  string type = 2;
+  map<string, string> parameters = 3;
+}
+
+message StartContainerRequest {
+  string command_id = 1;
+  string host_id = 2;
+  string container_id = 3;
+}
+
+message StopContainerRequest {
+  string command_id = 1;
+  string host_id = 2;
+  string container_id = 3;
+  uint32 timeout_seconds = 4;
+}
+
+message ContainerActionResponse {
+  string command_id = 1;
+  string container_id = 2;
+  bool success = 3;
+  string message = 4;
+}
+
+message GetContainerLogsRequest {
+  string host_id = 1;
+  string container_id = 2;
+  bool follow = 3;
+  bool timestamps = 4;
+  uint32 tail = 5;
+}
+
+message ContainerLogEntry {
+  string container_id = 1;
+  bytes data = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string stream = 4;
+}
