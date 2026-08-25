@@ -7,6 +7,7 @@ import { getRequestTraceId } from '../lib/trace';
 import { validateBody, StartContainerSchema, StopContainerSchema } from '../lib/validation';
 import { checkRateLimit, RATE_LIMITS } from '../lib/rateLimit';
 import { writeAuditLog } from '../lib/audit';
+import { checkResourceAllocation } from '../lib/resourceManager';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -33,6 +34,29 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
     }
 
     const { name, image, hostId, environmentVars, resourceLimits, portBindings } = validation.data;
+
+    // Check resource allocation on target host
+    const allocation = await checkResourceAllocation(hostId, tenantId, {
+      cpuShares: resourceLimits?.cpuShares,
+      memory: resourceLimits?.memory,
+    });
+
+    if (!allocation.allowed) {
+      await writeAuditLog({
+        tenantId,
+        userId,
+        action: 'CONTAINER_START',
+        resource: 'container',
+        metadata: { name, image, hostId, reason: allocation.reason },
+        result: 'failure',
+        error: allocation.reason,
+      });
+      return reply.status(402).send({
+        error: 'Insufficient host capacity',
+        details: allocation.reason,
+        remaining: allocation.remaining,
+      });
+    }
 
     // Create container in PENDING state
     const container = await containerService.startContainer(tenantId, {

@@ -102,6 +102,9 @@ model Host {
   status       HostStatus @default(PENDING)
   lastHeartbeat DateTime? @map("last_heartbeat")
   metadata     Json?
+  cpuCapacity      Int?   @map("cpu_capacity")       // total CPU shares available (e.g. 1024 per core)
+  memoryCapacity   BigInt? @map("memory_capacity")   // total memory in bytes
+  diskCapacity     BigInt? @map("disk_capacity")     // total disk in bytes
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
   tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)

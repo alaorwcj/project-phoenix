@@ -239,11 +239,13 @@ This document outlines the remaining work to build out the Docker Platform multi
 **Estimated**: 2-3 weeks
 **Priority**: MEDIUM (post-MVP)
 
-### 10.1 Resource Reservation
-- [ ] Track host capacity (CPU, memory, disk)
-- [ ] Prevent over-allocation
-- [ ] Resource forecasting
-- [ ] Multi-host scheduling (bin packing)
+### 10.1 Resource Reservation ✅
+- ✅ Track host capacity (CPU shares, memory, disk) — Host model fields
+- ✅ Prevent over-allocation — `checkResourceAllocation()` returns 402 on over-commit
+- ✅ Current usage computed from active (non-terminal) containers
+- ✅ Multi-host scheduling (most-fit bin packing) — `findBestHost()`
+- ✅ Backwards-compatible: hosts without capacity limits accept all allocations
+- ✅ Tests: `src/__tests__/phase10-resources.test.ts`
 
 ### 10.2 Multi-Host Orchestration
 - [ ] Agent pool management
