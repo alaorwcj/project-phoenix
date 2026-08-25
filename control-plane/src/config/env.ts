@@ -12,6 +12,11 @@ const envSchema = z.object({
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional(),
+  // TLS/mTLS Configuration
+  TLS_ENABLED: z.coerce.boolean().default(false),
+  TLS_CERT_PATH: z.string().optional(),
+  TLS_KEY_PATH: z.string().optional(),
+  TLS_CA_PATH: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

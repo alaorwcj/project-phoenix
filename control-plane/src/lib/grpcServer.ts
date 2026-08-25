@@ -3,6 +3,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
 import { hostAgentRepository } from '../repositories/hostAgentRepository';
 import { createContainerService } from '../services/containerService';
+import { createServerCredentials, getTLSConfig } from './tlsConfig';
 import type {
   RegisterHostRequest,
   RegisterHostResponse,
@@ -49,11 +50,15 @@ export class GrpcServer {
 
     return new Promise<void>((resolve, reject) => {
       const addr = '0.0.0.0:' + this.port;
-      this.server.bindAsync(addr, grpc.ServerCredentials.createInsecure(), (err: Error | null) => {
+      const tlsConfig = getTLSConfig();
+      const credentials = createServerCredentials(tlsConfig);
+      const tlsMode = tlsConfig.enabled ? 'mTLS' : 'insecure';
+
+      this.server.bindAsync(addr, credentials, (err: Error | null) => {
         if (err) reject(err);
         else {
           this.server.start();
-          const msg = 'gRPC server listening on 0.0.0.0:' + this.port;
+          const msg = `gRPC server listening on 0.0.0.0:${this.port} (${tlsMode})`;
           console.log(msg);
           resolve();
         }

@@ -140,22 +140,39 @@ This document outlines the remaining work to build out the Docker Platform multi
 
 ## Phase 7: Real gRPC Transport
 
-**Status**: Blocked on protoc Windows fix
+**Status**: In Progress 🔄 (Phase 7-1,7-2,7-3 Complete)
 **Estimated**: 1 week (after protoc available)
-**Priority**: MEDIUM (works with HTTP now)
+**Priority**: HIGH (security critical)
 
-### 7.1 Replace HTTP Adapter
-- [ ] Resolve protoc Windows UTF-8 encoding issue
-- [ ] Run real protoc codegen
-- [ ] Replace manual types with generated
-- [ ] Remove HTTP adapter (keep for dev/compat?)
-- [ ] Add gRPC tests
+### 7.1 Certificate Generation ✅
+- ✅ PowerShell script (Windows): `scripts/generate-certs.ps1`
+- ✅ Bash script (Linux/Mac): `scripts/generate-certs.sh`
+- ✅ Support for dev (self-signed) and prod modes
+- ✅ Generated: CA, server cert, client cert with proper extensions
 
-### 7.2 Add mTLS Authentication
-- [ ] Generate CA, server, client certificates
-- [ ] Implement mTLS validation
-- [ ] Certificate rotation strategy
-- [ ] Replace opaque agentId with JWT tokens
+### 7.2 mTLS Server (Control Plane) ✅
+- ✅ `src/lib/tlsConfig.ts`: TLS utilities
+- ✅ `src/lib/grpcServer.ts`: Use ServerCredentials.createSsl()
+- ✅ `src/config/env.ts`: TLS_ENABLED, TLS_CERT_PATH, TLS_KEY_PATH, TLS_CA_PATH
+- ✅ Backwards compatible (TLS_ENABLED=false for development)
+
+### 7.3 mTLS Client (Go Agent) ✅
+- ✅ `agent/internal/grpc/tls.go`: TLS credential loading
+- ✅ `agent/internal/grpc/client.go`: Use gRPC with mTLS
+- ✅ `agent/internal/config/config.go`: TLS configuration
+- ✅ `agent/cmd/agent/main.go`: Pass TLS config to client
+
+### 7.4 Integration Tests 🔄
+- [ ] `__tests__/grpc-mtls.test.ts`: mTLS server/client tests
+- [ ] Test certificate validation
+- [ ] Test certificate rejection scenarios
+- [ ] Performance benchmarks
+
+### 7.5 Documentation 🔄
+- ✅ `docs/PHASE_7_MTLS.md`: Complete guide
+- [ ] Troubleshooting section
+- [ ] Deployment checklist
+- [ ] Certificate rotation procedures
 
 ---
 

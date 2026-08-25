@@ -4,37 +4,64 @@ import (
 	"context"
 	"fmt"
 	pb "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen"
+	"google.golang.org/grpc"
 	"log"
 	"time"
 )
 
 type Client struct {
+	conn    *grpc.ClientConn
 	client  pb.HostAgentServiceClient
 	agentID string
 	hostID  string
 }
 
 // NewClient creates a new gRPC client for communication with Control Plane
-// For development: uses HTTP client; for production: should use real gRPC
-func NewClient(addr, agentID string) (*Client, error) {
-	// Development: use HTTP client
-	// TODO: Replace with real gRPC client once protoc generates code
-	client := pb.NewHTTPHostAgentServiceClient(addr)
+// Supports both insecure (dev) and mTLS (prod) modes
+func NewClient(addr, agentID string, tlsConfig *TLSConfig) (*Client, error) {
+	var dialOpts []grpc.DialOption
+
+	// Load TLS credentials if enabled
+	if tlsConfig != nil && tlsConfig.Enabled {
+		tlsDialOpt, err := LoadClientCredentials(tlsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+		dialOpts = append(dialOpts, tlsDialOpt)
+	} else {
+		// Development: insecure connection
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+		log.Println("Warning: gRPC connection is insecure (no TLS)")
+	}
+
+	// Add connection options
+	dialOpts = append(dialOpts,
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(1024*1024*100)),
+	)
+
+	conn, err := grpc.Dial(addr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
+	}
+
+	// Create gRPC client stub
+	grpcClient := pb.NewHostAgentServiceClient(conn)
 
 	return &Client{
-		client:  client,
+		conn:    conn,
+		client:  grpcClient,
 		agentID: agentID,
 	}, nil
 }
 
 func (c *Client) RegisterHost(ctx context.Context, name, hostname, os, dockerVersion string) (string, error) {
 	req := &pb.RegisterHostRequest{
-		AgentID:        c.agentID,
-		Hostname:       hostname,
-		DockerVersion:  dockerVersion,
+		AgentID:         c.agentID,
+		Hostname:        hostname,
+		DockerVersion:   dockerVersion,
 		OperatingSystem: os,
-		Architecture:   "amd64",
-		Labels:         map[string]string{"name": name},
+		Architecture:    "amd64",
+		Labels:          map[string]string{"name": name},
 	}
 
 	resp, err := c.client.RegisterHost(ctx, req)
@@ -77,5 +104,8 @@ func (c *Client) SendHeartbeat(ctx context.Context, metrics *pb.HostMetrics) err
 }
 
 func (c *Client) Close() error {
-	return c.conn.Close()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }

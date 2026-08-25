@@ -27,7 +27,15 @@ func main() {
 	}
 	defer dockerClient.Close()
 
-	grpcClient, err := grpc.NewClient(cfg.ControlPlaneAddr, cfg.AgentID)
+	// Prepare TLS config for gRPC client
+	tlsConfig := &grpc.TLSConfig{
+		Enabled:  cfg.TLSEnabled,
+		CertPath: cfg.TLSCertPath,
+		KeyPath:  cfg.TLSKeyPath,
+		CAPath:   cfg.TLSCAPath,
+	}
+
+	grpcClient, err := grpc.NewClient(cfg.ControlPlaneAddr, cfg.AgentID, tlsConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to Control Plane: %v", err)
 	}
