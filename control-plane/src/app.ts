@@ -2,7 +2,10 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { env } from './config/env';
 import { setupRoutes } from './routes/api';
+import { setupJobRoutes } from './routes/jobs';
 import { GrpcServer } from './lib/grpcServer';
+import { initializeJobQueue, getJobQueue } from './lib/jobQueue';
+import { registerJobHandlers } from './lib/jobHandlers';
 
 let grpcServer: GrpcServer;
 
@@ -11,7 +14,12 @@ export async function buildApp() {
   
   await app.register(cors, { origin: true });
   
+  // Initialize job queue
+  await initializeJobQueue();
+  await registerJobHandlers();
+
   await setupRoutes(app);
+  await setupJobRoutes(app);
 
   grpcServer = new GrpcServer(env.GRPC_PORT);
   
@@ -24,6 +32,8 @@ export async function buildApp() {
   });
 
   app.addHook('onClose', async () => {
+    const jobQueue = getJobQueue();
+    await jobQueue.closeQueues();
     await grpcServer.stop();
   });
 

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { createContainerService } from '../services/containerService';
+import { getJobQueue, JobType, ContainerStartJobData, ContainerStopJobData } from '../lib/jobQueue';
 import { PrismaClient } from '@prisma/client';
 
 const containerService = createContainerService();
@@ -19,6 +20,7 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       return reply.status(400).send({ error: 'Missing required fields: name, image, hostId' });
     }
 
+    // Create container in PENDING state
     const container = await containerService.startContainer(tenantId, {
       name,
       image,
@@ -28,7 +30,27 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       portBindings: portBindings || {},
     });
 
-    return reply.status(201).send(container);
+    // Enqueue job to handle actual container creation
+    const jobQueue = getJobQueue();
+    const jobData: ContainerStartJobData = {
+      containerId: container.id,
+      tenantId,
+      hostId,
+      image,
+      environmentVars: environmentVars || {},
+      resourceLimits: resourceLimits || {},
+    };
+
+    const job = await jobQueue.enqueueJob(JobType.CONTAINER_START, jobData, {
+      priority: 5,
+      delay: 1000, // Give DB a moment to settle
+    });
+
+    return reply.status(201).send({
+      ...container,
+      jobId: job.id,
+      jobStatus: 'queued',
+    });
   } catch (error) {
     console.error('Error starting container:', error);
     return reply.status(500).send({ error: (error as Error).message || 'Failed to start container' });
@@ -49,14 +71,40 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
       return reply.status(400).send({ error: 'Missing required field: containerId' });
     }
 
-    const container = await containerService.stopContainer(tenantId, {
+    // Verify container belongs to tenant and get current state
+    const container = await containerService.getContainer(tenantId, containerId);
+
+    // Update to STOPPING immediately for UI feedback
+    const stoppingContainer = await containerService.updateContainerStatus(
+      tenantId,
       containerId,
+      'STOPPING'
+    );
+
+    // Enqueue job to handle actual container stop
+    const jobQueue = getJobQueue();
+    const jobData: ContainerStopJobData = {
+      containerId,
+      tenantId,
       timeoutSeconds: timeoutSeconds || 15,
+    };
+
+    const job = await jobQueue.enqueueJob(JobType.CONTAINER_STOP, jobData, {
+      priority: 5,
     });
 
-    return reply.status(200).send(container);
+    return reply.status(200).send({
+      ...stoppingContainer,
+      jobId: job.id,
+      jobStatus: 'queued',
+    });
   } catch (error) {
     console.error('Error stopping container:', error);
+
+    if ((error as Error).message.includes('not found')) {
+      return reply.status(404).send({ error: 'Container not found' });
+    }
+
     return reply.status(500).send({ error: (error as Error).message || 'Failed to stop container' });
   }
 }

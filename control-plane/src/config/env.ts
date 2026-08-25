@@ -9,6 +9,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   GRPC_PORT: z.coerce.number().int().positive().default(50051),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  REDIS_HOST: z.string().default('localhost'),
+  REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  REDIS_PASSWORD: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

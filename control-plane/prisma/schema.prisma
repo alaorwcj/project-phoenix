@@ -54,6 +54,7 @@ model Tenant {
   environments Environment[]
   hosts        Host[]
   containers   Container[]
+  jobs         Job[]
 
   @@map("tenants")
 }
@@ -152,4 +153,30 @@ model ContainerLog {
   @@index([containerId])
   @@index([timestamp])
   @@map("container_logs")
+}
+
+model Job {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  jobId         String   @unique @map("job_id") // Bull job ID
+  jobType       String   @map("job_type") // container:start, container:stop, image:pull
+  status        String   // pending, processing, completed, failed
+  progress      Int      @default(0)
+  attempts      Int      @default(0)
+  maxAttempts   Int      @default(3) @map("max_attempts")
+  error         String?
+  result        Json?
+  containerId   String?  @map("container_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  completedAt   DateTime? @map("completed_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId])
+  @@index([tenantId])
+  @@index([jobType])
+  @@index([status])
+  @@index([createdAt])
+  @@map("jobs")
 }
