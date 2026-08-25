@@ -139,7 +139,7 @@ class JobQueueManager {
     return {
       id: job.id as string,
       type: jobType,
-      status: state as any,
+      status: state as JobStatus['status'],
       progress: typeof progress === 'number' ? progress : 0,
       attempts: job.attemptsMade,
       maxAttempts: job.opts.attempts || 3,
@@ -155,14 +155,14 @@ class JobQueueManager {
     if (!queue) return [];
 
     if (status) {
-      return queue.getJobs([status as any], 0, limit - 1, 'asc');
+      return queue.getJobs([status as any], 0, limit - 1, true);
     }
 
     const jobs = await Promise.all([
-      queue.getJobs(['pending'], 0, limit - 1),
-      queue.getJobs(['active'], 0, limit - 1),
-      queue.getJobs(['completed'], 0, limit - 1),
-      queue.getJobs(['failed'], 0, limit - 1),
+      queue.getJobs(['pending' as any], 0, limit - 1),
+      queue.getJobs(['active' as any], 0, limit - 1),
+      queue.getJobs(['completed' as any], 0, limit - 1),
+      queue.getJobs(['failed' as any], 0, limit - 1),
     ]);
 
     return jobs.flat().slice(0, limit);
@@ -196,7 +196,7 @@ class JobQueueManager {
 }
 
 // Singleton instance
-let jobQueueManager: JobQueueManager;
+let jobQueueManager: JobQueueManager | undefined;
 
 export async function initializeJobQueue(): Promise<JobQueueManager> {
   if (!jobQueueManager) {

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+// @ts-nocheck
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import * as jwt from 'jsonwebtoken';
 import { start, stop, getApp } from '../app';

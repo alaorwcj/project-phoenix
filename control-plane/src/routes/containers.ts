@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createContainerService, StartContainerInput, StopContainerInput } from '../services/containerService';
-import { authMiddleware, requireRole } from '../middleware/auth';
+import { authMiddleware } from '../middleware/auth';
+import { requireRole } from '../middleware/rbac';
 
 export async function containerRoutes(app: FastifyInstance) {
   const containerService = createContainerService();
@@ -12,7 +13,7 @@ export async function containerRoutes(app: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const tenantId = (request as any).user.tenantId;
-        const result = await containerService.startContainer(tenantId, request.body);
+        const result = await containerService.startContainer(tenantId, request.body as StartContainerInput);
         reply.code(201).send({
           success: true,
           data: result,
@@ -33,7 +34,7 @@ export async function containerRoutes(app: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const tenantId = (request as any).user.tenantId;
-        const result = await containerService.stopContainer(tenantId, request.body);
+        const result = await containerService.stopContainer(tenantId, request.body as StopContainerInput);
         reply.code(200).send({
           success: true,
           data: result,
@@ -54,7 +55,7 @@ export async function containerRoutes(app: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const tenantId = (request as any).user.tenantId;
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
         const container = await containerService.getContainer(tenantId, id);
         reply.code(200).send({
           success: true,
@@ -76,7 +77,7 @@ export async function containerRoutes(app: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const tenantId = (request as any).user.tenantId;
-        const { hostId } = request.query;
+        const { hostId } = request.query as { hostId?: string };
         const containers = await containerService.listContainers(tenantId, hostId);
         reply.code(200).send({
           success: true,

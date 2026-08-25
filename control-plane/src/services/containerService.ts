@@ -31,7 +31,7 @@ export interface ContainerService {
 }
 
 export class PrismaContainerService implements ContainerService {
-  constructor(private prisma: typeof prisma) {}
+  constructor(private prisma: PrismaClient) {}
 
   async startContainer(tenantId: string, input: StartContainerInput) {
     // Verify host belongs to tenant
