@@ -3,59 +3,67 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	pb "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"log"
+	"time"
 )
 
 type Client struct {
-	conn   *grpc.ClientConn
-	client pb.HostAgentServiceClient
+	client  pb.HostAgentServiceClient
 	agentID string
-	hostID string
+	hostID  string
 }
 
+// NewClient creates a new gRPC client for communication with Control Plane
+// For development: uses HTTP client; for production: should use real gRPC
 func NewClient(addr, agentID string) (*Client, error) {
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("did not connect: %v", err)
-	}
+	// Development: use HTTP client
+	// TODO: Replace with real gRPC client once protoc generates code
+	client := pb.NewHTTPHostAgentServiceClient(addr)
 
 	return &Client{
-		conn:    conn,
-		client:  pb.NewHostAgentServiceClient(conn),
+		client:  client,
 		agentID: agentID,
 	}, nil
 }
 
 func (c *Client) RegisterHost(ctx context.Context, name, hostname, os, dockerVersion string) (string, error) {
-	resp, err := c.client.RegisterHost(ctx, &pb.RegisterHostRequest{
-		AgentId:        c.agentID,
+	req := &pb.RegisterHostRequest{
+		AgentID:        c.agentID,
 		Hostname:       hostname,
 		DockerVersion:  dockerVersion,
 		OperatingSystem: os,
+		Architecture:   "amd64",
 		Labels:         map[string]string{"name": name},
-	})
+	}
+
+	resp, err := c.client.RegisterHost(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("register failed: %v", err)
 	}
 
-	c.hostID = resp.HostId
-	log.Printf("Host registered: %s (tenant: %s)", resp.HostId, resp.TenantId)
-	return resp.HostId, nil
+	if !resp.Accepted {
+		return "", fmt.Errorf("host registration not accepted: %s", resp.Message)
+	}
+
+	c.hostID = resp.HostID
+	log.Printf("Host registered: %s (tenant: %s)\n", resp.HostID, resp.TenantID)
+	return resp.HostID, nil
 }
 
-func (c *Client) SendHeartbeat(ctx context.Context, metrics map[string]interface{}) error {
+func (c *Client) SendHeartbeat(ctx context.Context, metrics *pb.HostMetrics) error {
 	if c.hostID == "" {
 		return fmt.Errorf("host not registered yet")
 	}
 
-	resp, err := c.client.Heartbeat(ctx, &pb.HeartbeatRequest{
-		HostId:  c.hostID,
-		AgentId: c.agentID,
-	})
+	req := &pb.HeartbeatRequest{
+		HostID:     c.hostID,
+		AgentID:    c.agentID,
+		Metrics:    metrics,
+		ObservedAt: time.Now(),
+	}
+
+	resp, err := c.client.Heartbeat(ctx, req)
 	if err != nil {
 		return fmt.Errorf("heartbeat failed: %v", err)
 	}
@@ -64,6 +72,7 @@ func (c *Client) SendHeartbeat(ctx context.Context, metrics map[string]interface
 		return fmt.Errorf("heartbeat not acknowledged")
 	}
 
+	log.Printf("Heartbeat acknowledged at %v\n", resp.ServerTime)
 	return nil
 }
 
