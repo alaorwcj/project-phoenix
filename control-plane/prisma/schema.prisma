@@ -174,7 +174,6 @@ model Job {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([jobId])
   @@index([tenantId])
   @@index([jobType])
   @@index([status])
