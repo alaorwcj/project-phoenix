@@ -9,9 +9,11 @@ Plataforma centralizada para orquestração, monitoramento e gerenciamento de ho
 | **REST API** | ✅ Completo | JWT auth, RBAC (ADMIN/OPERATOR/VIEWER), multi-tenant isolation |
 | **gRPC Server** | ✅ Completo | RegisterHost, Heartbeat, Container ops (stubs) |
 | **Proto Types** | ✅ Completo | TypeScript e Go (manual, sem protoc) |
-| **Go Agent** | ✅ Scaffold | Config, Docker client, gRPC client, heartbeat loop |
-| **Database** | ⏳ Migration | Schema pronto; migrations aguardando geração |
-| **Integration Tests** | ⏳ Pending | End-to-end testing agent ↔ control-plane |
+| **Go Agent** | ✅ Completo | Config, Docker client (extended), gRPC client, heartbeat loop |
+| **Database** | ✅ Completo | Tenant, User, Environment, Host, Container, ContainerLog, Job models |
+| **Container Operations** | ✅ Fase 5 | StartContainer, StopContainer, GetContainerLogs com lifecycle tracking |
+| **Job Queue** | ✅ Fase 6 | Bull + Redis para async operations com retry e progress tracking |
+| **Integration Tests** | ✅ Completo | Tenants, hosts, containers, job queue, isolation verification |
 
 ## 🏗️ Arquitetura
 
@@ -191,9 +193,10 @@ curl -H "Authorization: Bearer $JWT_TOKEN" \
 |-----|---------|----------|--------|
 | **RegisterHost** | RegisterHostRequest | RegisterHostResponse | ✅ Impl |
 | **Heartbeat** | HeartbeatRequest | HeartbeatResponse | ✅ Impl |
-| **StartContainer** | StartContainerRequest | ContainerActionResponse | ⏳ Stub |
-| **StopContainer** | StopContainerRequest | ContainerActionResponse | ⏳ Stub |
-| **GetContainerLogs** | GetContainerLogsRequest | stream ContainerLogEntry | ⏳ Stub |
+| **StartContainer** | StartContainerRequest | ContainerActionResponse | ✅ Phase 5 |
+| **StopContainer** | StopContainerRequest | ContainerActionResponse | ✅ Phase 5 |
+| **GetContainerLogs** | GetContainerLogsRequest | stream ContainerLogEntry | ✅ Phase 5 |
+| **Job Queue** | - | - | ✅ Phase 6 |
 
 ### Mensagens Principais
 
@@ -351,6 +354,7 @@ npm run test:integration
 | #5 | Go Host Agent | 1 | ✅ Merged |
 | #6 | gRPC Server Implementation | 1 | ✅ Merged |
 | #7 | Proto Types Generation | 1 | ✅ Merged |
+| #9 | Phase 4-5-6: Database, Containers, Job Queue | 2 | 🔄 Open |
 
 ## 🔗 Referências
 

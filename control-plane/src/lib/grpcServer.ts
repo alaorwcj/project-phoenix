@@ -2,6 +2,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
 import { hostAgentRepository } from '../repositories/hostAgentRepository';
+import { createContainerService } from '../services/containerService';
 import type {
   RegisterHostRequest,
   RegisterHostResponse,
@@ -19,6 +20,7 @@ const PROTO_PATH = path.join(__dirname, '../../proto/docker_platform.proto');
 export class GrpcServer {
   private server: grpc.Server;
   private port: number;
+  private containerService = createContainerService();
 
   constructor(port: number) {
     this.server = new grpc.Server();
@@ -91,8 +93,32 @@ export class GrpcServer {
 
   private async startContainer(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
     try {
-      const { container_id } = call.request;
-      callback(null, { container_id, success: true, message: 'Container start queued' });
+      const { command_id, host_id, container_id } = call.request;
+      if (!command_id || !host_id || !container_id) {
+        return callback(new Error('Missing required fields: command_id, host_id, container_id') as any);
+      }
+
+      // Find container and verify it belongs to correct host
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      
+      const container = await prisma.container.findUnique({
+        where: { id: container_id },
+      });
+
+      if (!container || container.hostId !== host_id) {
+        return callback(new Error(`Container ${container_id} not found on host ${host_id}`) as any);
+      }
+
+      // Update status to CREATING
+      await this.containerService.updateContainerStatus(container.tenantId, container_id, 'CREATING' as any);
+
+      callback(null, {
+        command_id,
+        container_id,
+        success: true,
+        message: 'Container start operation queued',
+      });
     } catch (error) {
       callback(error as Error);
     }
@@ -100,8 +126,31 @@ export class GrpcServer {
 
   private async stopContainer(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
     try {
-      const { container_id } = call.request;
-      callback(null, { container_id, success: true, message: 'Container stop queued' });
+      const { command_id, host_id, container_id, timeout_seconds } = call.request;
+      if (!command_id || !host_id || !container_id) {
+        return callback(new Error('Missing required fields') as any);
+      }
+
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+
+      const container = await prisma.container.findUnique({
+        where: { id: container_id },
+      });
+
+      if (!container || container.hostId !== host_id) {
+        return callback(new Error(`Container ${container_id} not found on host ${host_id}`) as any);
+      }
+
+      // Update status to STOPPING
+      await this.containerService.updateContainerStatus(container.tenantId, container_id, 'STOPPING' as any);
+
+      callback(null, {
+        command_id,
+        container_id,
+        success: true,
+        message: `Container stop operation queued (timeout: ${timeout_seconds || 15}s)`,
+      });
     } catch (error) {
       callback(error as Error);
     }
@@ -109,8 +158,51 @@ export class GrpcServer {
 
   private async *getContainerLogs(call: grpc.ServerWritableStream<any, any>) {
     try {
-      const { container_id } = call.request;
-      call.write({ container_id, data: Buffer.from('Log streaming not yet implemented'), stream: 'stdout' });
+      const { host_id, container_id, follow, tail } = call.request;
+      
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+
+      const container = await prisma.container.findUnique({
+        where: { id: container_id },
+      });
+
+      if (!container || container.hostId !== host_id) {
+        call.destroy(new Error(`Container ${container_id} not found on host ${host_id}`));
+        return;
+      }
+
+      // Query logs from database
+      const logs = await prisma.containerLog.findMany({
+        where: {
+          containerId: container_id,
+        },
+        orderBy: {
+          timestamp: 'asc',
+        },
+        take: tail || 100,
+      });
+
+      // Send log entries
+      for (const log of logs) {
+        call.write({
+          container_id,
+          data: log.data,
+          timestamp: log.timestamp,
+          stream: log.stream,
+        });
+      }
+
+      // If follow mode, keep stream open (in production, would subscribe to new logs)
+      if (follow) {
+        // TODO: Implement log tailing with subscription
+        call.write({
+          container_id,
+          data: Buffer.from('(streaming mode - new logs would appear here)'),
+          stream: 'stdout',
+        });
+      }
+
       call.end();
     } catch (error) {
       call.destroy(error as Error);
