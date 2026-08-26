@@ -6,6 +6,7 @@ Comprehensive guide for the **Project Phoenix** multi-tenant Docker management p
 
 - **Control Plane**: Node.js/TypeScript REST API + gRPC server (Fastify + Prisma + PostgreSQL)
 - **Host Agent**: Go-based daemon on Docker hosts (Docker Engine API + gRPC client)
+- **Web Dashboard**: React SPA (Vite + TypeScript + Tailwind CSS) — http://localhost:8080
 - **Production Infrastructure**: Docker images, Helm charts, monitoring (Prometheus/Grafana), backups
 - **Complete Platform**: 12 phases including security, observability, resource management, and deployment
 
@@ -58,6 +59,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/containers
 | `redis` | 6379 | Job queue (Bull) |
 | `control-plane` | 3000/50051/9090 | HTTP / gRPC / metrics |
 | `agent` | — | Docker host agent |
+| `dashboard` | 8080 | React web UI (Vite SPA) |
 
 ```bash
 docker-compose logs -f control-plane      # Follow logs
@@ -72,6 +74,20 @@ docker-compose up -d postgres redis       # Just infrastructure
 cd control-plane && npm install && npx prisma generate && npx prisma migrate dev
 npm run db:seed && npm run dev            # Seed + start
 ```
+
+## Web Dashboard Development
+
+```bash
+cd dashboard && npm install
+npm run dev                               # Start Vite dev server (http://localhost:5173)
+npm run build                             # Build for production
+```
+
+**API Proxy**: Vite proxies `/api` → `http://localhost:3000` during development.
+
+**Auth**: JWT stored in localStorage as `docker-platform-auth`. Demo credentials:
+- Email: `admin@acme.local`
+- Password: `admin123456`
 
 ## Test Credentials
 
@@ -149,6 +165,26 @@ cd deploy/helm/docker-platform
 helm install docker-platform . --namespace docker-platform --create-namespace
 ```
 
+## Production Deployment (Docker Compose)
+
+```bash
+cp .env.example .env                        # Copy and edit with real passwords
+make deploy-prod                            # Full stack with production overrides
+```
+
+**Production override** (`docker-compose.prod.yml`) adds:
+- TLS termination via nginx (port 443)
+- Restart policies (always)
+- Log rotation (10MB max, 3-5 files)
+- Password-based Redis auth
+- Secure JWT secret requirement
+
+**Dashboard-only Docker build:**
+```bash
+cd dashboard && docker build -t docker-platform-dashboard .
+docker run -p 8080:80 docker-platform-dashboard
+```
+
 ## Production Database
 
 ```bash
@@ -182,13 +218,17 @@ project-phoenix/
 │   ├── prisma/        # Schema + migrations
 │   └── src/__tests__/ # Tests (vitest)
 ├── agent/             # Go: Docker client, gRPC, CLI, logging, metrics
+├── dashboard/         # React: Vite SPA + Tailwind CSS (port 8080)
+│   └── src/           # Components, pages, hooks, lib, types
 ├── proto/             # gRPC definitions
 ├── deploy/
 │   ├── database/      # PostgreSQL config, backup/restore
 │   ├── helm/          # Kubernetes chart
+│   ├── nginx/         # TLS reverse proxy config
 │   └── monitoring/    # Prometheus, Grafana
 ├── scripts/           # Setup, certs
 ├── docker-compose.yml
+├── docker-compose.prod.yml
 └── ROADMAP.md
 ```
 
@@ -196,7 +236,10 @@ project-phoenix/
 
 ```bash
 docker-compose logs postgres                   # DB issues
+docker-compose logs dashboard                  # Dashboard issues
 npx prisma generate && npx tsc --noEmit        # TS compilation
+cd dashboard && npm run build                  # Dashboard build
 netstat -ano | findstr :50051                   # Port conflict (Windows)
 curl http://localhost:3000/api/status           # Control Plane health
+curl http://localhost:8080/health               # Dashboard health
 ```
