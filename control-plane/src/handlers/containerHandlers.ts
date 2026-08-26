@@ -8,6 +8,7 @@ import { validateBody, StartContainerSchema, StopContainerSchema } from '../lib/
 import { checkRateLimit, RATE_LIMITS } from '../lib/rateLimit';
 import { writeAuditLog } from '../lib/audit';
 import { checkResourceAllocation } from '../lib/resourceManager';
+import { recordContainerStart, recordContainerStop } from '../lib/costTracking';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -85,6 +86,16 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       traceId: getRequestTraceId(request as unknown as object),
     });
 
+    // Record cost-tracking event (snapshot of resources at start time)
+    await recordContainerStart({
+      tenantId,
+      containerId: container.id,
+      cpuShares: resourceLimits?.cpuShares,
+      memoryBytes: resourceLimits?.memory,
+      image,
+      hostId,
+    });
+
     await writeAuditLog({
       tenantId,
       userId,
@@ -160,6 +171,12 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_STOP, jobData, {
       priority: 5,
       traceId: getRequestTraceId(request as unknown as object),
+    });
+
+    // Record cost-tracking event (with duration calculated at stop time)
+    await recordContainerStop({
+      tenantId,
+      containerId,
     });
 
     await writeAuditLog({

@@ -259,10 +259,15 @@ This document outlines the remaining work to build out the Docker Platform multi
   - GET  /api/hosts/:id/migration-targets
 - ✅ Tests: `src/__tests__/phase10-host-health.test.ts`
 
-### 10.3 Cost Management
-- [ ] Per-tenant usage tracking
-- [ ] Cost attribution
-- [ ] Billing integration (Stripe/Zuora)
+### 10.3 Cost Management ✅
+- ✅ Per-tenant usage tracking — `UsageEvent` model records start/stop events
+- ✅ Cost attribution — `recordContainerStop()` computes duration + cost from pricing tier
+- ✅ Usage aggregation — `getTenantUsageSummary()` totals cost/hours over a window
+- ✅ Pricing model — `DEFAULT_PRICING` (CPU shares + memory GB per hour)
+- ✅ REST endpoint — GET /api/usage/summary?from=&to=
+- ✅ Migration — `0006_add_cost_tracking`
+- ✅ Tests: `src/__tests__/phase10-cost-tracking.test.ts`
+- [ ] Billing integration (Stripe/Zuora) — deferred to Phase 12
 
 ---
 

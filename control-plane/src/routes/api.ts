@@ -6,6 +6,7 @@ import { listEnvironmentsHandler, getEnvironmentHandler, createEnvironmentHandle
 import { listHostsHandler, getHostHandler, registerHostHandler } from '../handlers/hostHandlers';
 import { startContainerHandler, stopContainerHandler, getContainerHandler, listContainersHandler } from '../handlers/containerHandlers';
 import { evaluateHostHealth, planFailover, findMigrationTargets } from '../lib/hostHealth';
+import { getTenantUsageSummary } from '../lib/costTracking';
 import { UserRole } from '@prisma/client';
 
 export async function setupRoutes(app: FastifyInstance) {
@@ -56,6 +57,23 @@ export async function setupRoutes(app: FastifyInstance) {
       const cpuShares = request.query.cpuShares ? Number(request.query.cpuShares) : 0;
       const memory = request.query.memory ? Number(request.query.memory) : 0;
       return findMigrationTargets(tenantId, request.params.id, { cpuShares, memory });
+    }
+  );
+
+  // Cost tracking endpoints (viewers can read their own tenant usage)
+  app.get<{ Querystring: { from?: string; to?: string } }>(
+    '/api/usage/summary',
+    { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) },
+    async (request) => {
+      const tenantId = (request.user as any).tenantId;
+      const from = request.query.from ? new Date(request.query.from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+      const to = request.query.to ? new Date(request.query.to) : new Date();
+
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return { error: 'Invalid date format (use ISO 8601)' };
+      }
+
+      return getTenantUsageSummary(tenantId, from, to);
     }
   );
 }
