@@ -3,8 +3,12 @@ import { hostRepository } from '../repositories/hostRepository';
 export class HostNotFoundError extends Error {}
 
 export const hostService = {
-  async list(tenantId: string) {
-    return hostRepository.listByTenant(tenantId);
+  async list(tenantId: string, options?: { limit?: number; offset?: number }) {
+    return hostRepository.listByTenant(tenantId, options);
+  },
+
+  async count(tenantId: string) {
+    return hostRepository.countByTenant(tenantId);
   },
 
   async get(tenantId: string, id: string) {

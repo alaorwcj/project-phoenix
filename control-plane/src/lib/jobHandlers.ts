@@ -6,8 +6,10 @@ import {
   getJobQueue,
   JobType,
 } from '../lib/jobQueue';
-import { createContainerService } from './containerService';
+import { createContainerService } from '../services/containerService';
 import { PrismaClient } from '@prisma/client';
+import { getLogger } from './logger';
+import { createTraceId } from './trace';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -19,6 +21,12 @@ const prisma = new PrismaClient();
 export async function handleContainerStartJob(job: Job<ContainerStartJobData>) {
   const { containerId, tenantId, hostId, image, environmentVars, resourceLimits } =
     job.data;
+  const log = getLogger({
+    component: 'job-handler',
+    jobType: JobType.CONTAINER_START,
+    jobId: job.id,
+    traceId: getJobTraceId(job),
+  });
 
   try {
     job.progress(10); // 10% - Job started
@@ -46,9 +54,7 @@ export async function handleContainerStartJob(job: Job<ContainerStartJobData>) {
 
     // Call gRPC agent to start the container
     // TODO: Implement actual gRPC call to agent
-    console.log(
-      `[ContainerStartJob] Would call gRPC to start container ${containerId} on host ${hostId}`
-    );
+    log.info({ containerId, hostId, image }, 'Would call gRPC to start container');
 
     // Simulate agent work
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -66,13 +72,13 @@ export async function handleContainerStartJob(job: Job<ContainerStartJobData>) {
       message: 'Container started successfully',
     };
   } catch (error) {
-    console.error('[ContainerStartJob] Error:', error);
+    log.error({ err: error, containerId, hostId }, 'Container start job failed');
 
     // Update container status to FAILED
     try {
       await containerService.updateContainerStatus(tenantId, containerId, 'FAILED');
     } catch (statusError) {
-      console.error('[ContainerStartJob] Failed to update status:', statusError);
+      log.error({ err: statusError, containerId }, 'Failed to update container status');
     }
 
     throw error;
@@ -85,6 +91,12 @@ export async function handleContainerStartJob(job: Job<ContainerStartJobData>) {
  */
 export async function handleContainerStopJob(job: Job<ContainerStopJobData>) {
   const { containerId, tenantId, timeoutSeconds } = job.data;
+  const log = getLogger({
+    component: 'job-handler',
+    jobType: JobType.CONTAINER_STOP,
+    jobId: job.id,
+    traceId: getJobTraceId(job),
+  });
 
   try {
     job.progress(10); // 10% - Job started
@@ -107,9 +119,7 @@ export async function handleContainerStopJob(job: Job<ContainerStopJobData>) {
 
     // Call gRPC agent to stop the container
     // TODO: Implement actual gRPC call to agent
-    console.log(
-      `[ContainerStopJob] Would call gRPC to stop container ${containerId} with timeout ${timeoutSeconds}s`
-    );
+    log.info({ containerId, timeoutSeconds }, 'Would call gRPC to stop container');
 
     // Simulate agent work
     await new Promise((resolve) => setTimeout(resolve, Math.min(timeoutSeconds * 1000, 5000)));
@@ -127,7 +137,7 @@ export async function handleContainerStopJob(job: Job<ContainerStopJobData>) {
       message: 'Container stopped successfully',
     };
   } catch (error) {
-    console.error('[ContainerStopJob] Error:', error);
+    log.error({ err: error, containerId }, 'Container stop job failed');
 
     // Update container status to FAILED (only if not already stopped)
     try {
@@ -138,7 +148,7 @@ export async function handleContainerStopJob(job: Job<ContainerStopJobData>) {
         await containerService.updateContainerStatus(tenantId, containerId, 'FAILED');
       }
     } catch (statusError) {
-      console.error('[ContainerStopJob] Failed to update status:', statusError);
+      log.error({ err: statusError, containerId }, 'Failed to update container status');
     }
 
     throw error;
@@ -151,6 +161,12 @@ export async function handleContainerStopJob(job: Job<ContainerStopJobData>) {
  */
 export async function handleImagePullJob(job: Job<ImagePullJobData>) {
   const { tenantId, hostId, image } = job.data;
+  const log = getLogger({
+    component: 'job-handler',
+    jobType: JobType.IMAGE_PULL,
+    jobId: job.id,
+    traceId: getJobTraceId(job),
+  });
 
   try {
     job.progress(10); // 10% - Job started
@@ -167,7 +183,7 @@ export async function handleImagePullJob(job: Job<ImagePullJobData>) {
     job.progress(25); // 25% - Host verified
 
     // Log image pull start
-    console.log(`[ImagePullJob] Pulling image ${image} on host ${hostId}`);
+    log.info({ image, hostId }, 'Pulling image');
 
     // Call gRPC agent to pull the image
     // TODO: Implement actual gRPC call to agent
@@ -185,7 +201,7 @@ export async function handleImagePullJob(job: Job<ImagePullJobData>) {
       message: `Image ${image} pulled successfully`,
     };
   } catch (error) {
-    console.error('[ImagePullJob] Error:', error);
+    log.error({ err: error, image, hostId }, 'Image pull job failed');
     throw error;
   }
 }
@@ -213,5 +229,13 @@ export async function registerJobHandlers() {
     imagePullQueue.process(1, handleImagePullJob);
   }
 
-  console.log('[JobHandlers] All handlers registered');
+  getLogger({ component: 'job-handler' }).info({}, 'All handlers registered');
+}
+
+function getJobTraceId(job: Job) {
+  const traceId = (job.opts as Record<string, unknown>).traceId;
+  if (typeof traceId === 'string' && traceId.trim()) {
+    return traceId.trim();
+  }
+  return createTraceId();
 }

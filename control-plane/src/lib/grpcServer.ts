@@ -3,6 +3,10 @@ import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
 import { hostAgentRepository } from '../repositories/hostAgentRepository';
 import { createContainerService } from '../services/containerService';
+import { createServerCredentials, getTLSConfig } from './tlsConfig';
+import { getLogger } from './logger';
+import { observeGrpcOperation } from './metrics';
+import { createTraceId } from './trace';
 import type {
   RegisterHostRequest,
   RegisterHostResponse,
@@ -49,12 +53,19 @@ export class GrpcServer {
 
     return new Promise<void>((resolve, reject) => {
       const addr = '0.0.0.0:' + this.port;
-      this.server.bindAsync(addr, grpc.ServerCredentials.createInsecure(), (err: Error | null) => {
+      const tlsConfig = getTLSConfig();
+      const credentials = createServerCredentials(tlsConfig);
+      const tlsMode = tlsConfig.enabled ? 'mTLS' : 'insecure';
+
+      this.server.bindAsync(addr, credentials, (err: Error | null) => {
         if (err) reject(err);
         else {
           this.server.start();
-          const msg = 'gRPC server listening on 0.0.0.0:' + this.port;
-          console.log(msg);
+          const msg = `gRPC server listening on 0.0.0.0:${this.port} (${tlsMode})`;
+          getLogger({ component: 'grpc-server', port: this.port, tlsMode }).info(
+            {},
+            msg
+          );
           resolve();
         }
       });
@@ -62,9 +73,22 @@ export class GrpcServer {
   }
 
   private async registerHost(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
+    const startedAt = process.hrtime.bigint();
+    const traceId = getTraceIdFromCall(call);
+    const log = getLogger({ component: 'grpc-server', rpc: 'RegisterHost', traceId });
+    const finish = (status: 'ok' | 'error', error: Error | null, response?: any) => {
+      observeGrpcOperation('RegisterHost', status, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      if (status === 'ok') {
+        log.info({ hostId: response?.host_id, tenantId: response?.tenant_id }, 'RegisterHost handled');
+      } else if (error) {
+        log.error({ err: error }, 'RegisterHost failed');
+      }
+      callback(error as any, response);
+    };
+
     try {
       const { agent_id, hostname, operating_system, docker_version } = call.request;
-      if (!agent_id || !hostname) return callback(new Error('Missing required fields') as any);
+      if (!agent_id || !hostname) return finish('error', new Error('Missing required fields'));
 
       const host = await hostAgentRepository.registerAgent('default-tenant', agent_id, {
         name: hostname,
@@ -72,30 +96,56 @@ export class GrpcServer {
         metadata: { os: operating_system, docker_version },
       });
 
-      callback(null, { host_id: host.id, tenant_id: host.tenantId, accepted: true, message: 'Host registered' });
+      finish('ok', null, { host_id: host.id, tenant_id: host.tenantId, accepted: true, message: 'Host registered' });
     } catch (error) {
-      callback(error as Error);
+      finish('error', error as Error);
     }
   }
 
   private async heartbeat(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
+    const startedAt = process.hrtime.bigint();
+    const traceId = getTraceIdFromCall(call);
+    const log = getLogger({ component: 'grpc-server', rpc: 'Heartbeat', traceId });
+    const finish = (status: 'ok' | 'error', error: Error | null, response?: any) => {
+      observeGrpcOperation('Heartbeat', status, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      if (status === 'ok') {
+        log.info({ hostId: call.request?.host_id }, 'Heartbeat handled');
+      } else if (error) {
+        log.error({ err: error }, 'Heartbeat failed');
+      }
+      callback(error as any, response);
+    };
+
     try {
       const { host_id, agent_id, metrics } = call.request;
-      if (!host_id || !agent_id) return callback(new Error('Missing host_id or agent_id') as any);
+      if (!host_id || !agent_id) return finish('error', new Error('Missing host_id or agent_id'));
 
       await hostAgentRepository.updateHeartbeat(host_id, metrics);
 
-      callback(null, { acknowledged: true, server_time: new Date() });
+      finish('ok', null, { acknowledged: true, server_time: new Date() });
     } catch (error) {
-      callback(error as Error);
+      finish('error', error as Error);
     }
   }
 
   private async startContainer(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
+    const startedAt = process.hrtime.bigint();
+    const traceId = getTraceIdFromCall(call);
+    const log = getLogger({ component: 'grpc-server', rpc: 'StartContainer', traceId });
+    const finish = (status: 'ok' | 'error', error: Error | null, response?: any) => {
+      observeGrpcOperation('StartContainer', status, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      if (status === 'ok') {
+        log.info({ containerId: response?.container_id, commandId: response?.command_id }, 'StartContainer handled');
+      } else if (error) {
+        log.error({ err: error }, 'StartContainer failed');
+      }
+      callback(error as any, response);
+    };
+
     try {
       const { command_id, host_id, container_id } = call.request;
       if (!command_id || !host_id || !container_id) {
-        return callback(new Error('Missing required fields: command_id, host_id, container_id') as any);
+        return finish('error', new Error('Missing required fields: command_id, host_id, container_id'));
       }
 
       // Find container and verify it belongs to correct host
@@ -107,28 +157,41 @@ export class GrpcServer {
       });
 
       if (!container || container.hostId !== host_id) {
-        return callback(new Error(`Container ${container_id} not found on host ${host_id}`) as any);
+        return finish('error', new Error(`Container ${container_id} not found on host ${host_id}`));
       }
 
       // Update status to CREATING
       await this.containerService.updateContainerStatus(container.tenantId, container_id, 'CREATING' as any);
 
-      callback(null, {
+      finish('ok', null, {
         command_id,
         container_id,
         success: true,
         message: 'Container start operation queued',
       });
     } catch (error) {
-      callback(error as Error);
+      finish('error', error as Error);
     }
   }
 
   private async stopContainer(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
+    const startedAt = process.hrtime.bigint();
+    const traceId = getTraceIdFromCall(call);
+    const log = getLogger({ component: 'grpc-server', rpc: 'StopContainer', traceId });
+    const finish = (status: 'ok' | 'error', error: Error | null, response?: any) => {
+      observeGrpcOperation('StopContainer', status, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      if (status === 'ok') {
+        log.info({ containerId: response?.container_id, commandId: response?.command_id }, 'StopContainer handled');
+      } else if (error) {
+        log.error({ err: error }, 'StopContainer failed');
+      }
+      callback(error as any, response);
+    };
+
     try {
       const { command_id, host_id, container_id, timeout_seconds } = call.request;
       if (!command_id || !host_id || !container_id) {
-        return callback(new Error('Missing required fields') as any);
+        return finish('error', new Error('Missing required fields'));
       }
 
       const { PrismaClient } = await import('@prisma/client');
@@ -139,24 +202,37 @@ export class GrpcServer {
       });
 
       if (!container || container.hostId !== host_id) {
-        return callback(new Error(`Container ${container_id} not found on host ${host_id}`) as any);
+        return finish('error', new Error(`Container ${container_id} not found on host ${host_id}`));
       }
 
       // Update status to STOPPING
       await this.containerService.updateContainerStatus(container.tenantId, container_id, 'STOPPING' as any);
 
-      callback(null, {
+      finish('ok', null, {
         command_id,
         container_id,
         success: true,
         message: `Container stop operation queued (timeout: ${timeout_seconds || 15}s)`,
       });
     } catch (error) {
-      callback(error as Error);
+      finish('error', error as Error);
     }
   }
 
   private async *getContainerLogs(call: grpc.ServerWritableStream<any, any>) {
+    const startedAt = process.hrtime.bigint();
+    const traceId = getTraceIdFromCall(call);
+    const log = getLogger({ component: 'grpc-server', rpc: 'GetContainerLogs', traceId });
+    const finish = (status: 'ok' | 'error', error?: Error) => {
+      observeGrpcOperation('GetContainerLogs', status, Number(process.hrtime.bigint() - startedAt) / 1e9);
+      if (error) {
+        log.error({ err: error }, 'GetContainerLogs failed');
+        call.destroy(error);
+      } else {
+        log.info({ containerId: call.request?.container_id }, 'GetContainerLogs handled');
+      }
+    };
+
     try {
       const { host_id, container_id, follow, tail } = call.request;
       
@@ -168,7 +244,7 @@ export class GrpcServer {
       });
 
       if (!container || container.hostId !== host_id) {
-        call.destroy(new Error(`Container ${container_id} not found on host ${host_id}`));
+        finish('error', new Error(`Container ${container_id} not found on host ${host_id}`));
         return;
       }
 
@@ -204,8 +280,9 @@ export class GrpcServer {
       }
 
       call.end();
+      finish('ok');
     } catch (error) {
-      call.destroy(error as Error);
+      finish('error', error as Error);
     }
   }
 
@@ -214,4 +291,16 @@ export class GrpcServer {
       this.server.tryShutdown(() => resolve());
     });
   }
+}
+
+function getTraceIdFromCall(call: { metadata?: grpc.Metadata }) {
+  const value = call.metadata?.get('x-trace-id')?.[0];
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (Buffer.isBuffer(value)) {
+    const traceId = value.toString('utf8').trim();
+    if (traceId) return traceId;
+  }
+  return createTraceId();
 }

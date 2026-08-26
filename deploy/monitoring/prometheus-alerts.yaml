@@ -1,0 +1,169 @@
+# Prometheus Alert Rules for docker-platform
+# Deploy via Prometheus Operator or standalone Prometheus
+
+groups:
+  - name: docker-platform.control-plane
+    rules:
+      # High error rate on API
+      - alert: HighAPIErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "High API error rate (>5%)"
+          description: "{{ $value | humanizePercentage }} of requests are failing"
+
+      # API latency too high
+      - alert: HighAPILatency
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "API p95 latency > 2s"
+          description: "95th percentile latency is {{ $value }}s"
+
+      # gRPC operations failing
+      - alert: GRPCOperationFailures
+        expr: |
+          sum(rate(grpc_operations_total{status="error"}[5m])) > 5
+        for: 3m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "gRPC operation failures > 5/s"
+          description: "{{ $value }} errors/sec across gRPC operations"
+
+      # Job queue backing up
+      - alert: JobQueueBacklog
+        expr: |
+          sum(job_queue_enqueued_total - job_queue_completed_total - job_queue_failed_total) > 50
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Job queue backlog > 50"
+          description: "{{ $value }} jobs pending in the queue"
+
+      # Job failure rate
+      - alert: HighJobFailureRate
+        expr: |
+          sum(rate(job_queue_failed_total[5m])) / sum(rate(job_queue_completed_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Job failure rate > 10%"
+          description: "{{ $value | humanizePercentage }} of jobs are failing"
+
+  - name: docker-platform.hosts
+    rules:
+      # Host goes OFFLINE
+      - alert: HostOffline
+        expr: |
+          sum by (host_id) (host_status{status="OFFLINE"}) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "Host {{ $labels.host_id }} went OFFLINE"
+          description: "Agent heartbeat lost for > 2 minutes"
+
+      # No healthy hosts available
+      - alert: NoHealthyHosts
+        expr: |
+          sum(host_status{status="ONLINE"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: infrastructure
+        annotations:
+          summary: "No healthy hosts available"
+          description: "All hosts are OFFLINE — cannot schedule new containers"
+
+      # Host CPU capacity at risk
+      - alert: HostCPUCapacityHigh
+        expr: |
+          (sum by (host_id)(container_cpu_used) / sum by (host_id)(host_cpu_capacity)) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Host {{ $labels.host_id }} CPU at {{ $value | humanizePercentage }}"
+          description: "Consider adding capacity or migrating containers"
+
+  - name: docker-platform.database
+    rules:
+      # Database connection pool exhaustion
+      - alert: DatabaseConnectionPoolFull
+        expr: |
+          pg_stat_activity_count > 180
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Database connections approaching limit (>180/200)"
+          description: "{{ $value }} active connections"
+
+      # Slow queries detected
+      - alert: SlowQueriesDetected
+        expr: |
+          rate(pg_stat_statements_total_time_seconds[5m]) / rate(pg_stat_statements_calls[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Average query time > 1 second"
+          description: "Database may need index optimization"
+
+      # Replication lag
+      - alert: ReplicationLagHigh
+        expr: |
+          pg_replication_lag_seconds > 30
+        for: 3m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Replication lag > 30s"
+          description: "Read replica is {{ $value }}s behind primary"
+
+  - name: docker-platform.slo
+    rules:
+      # SLO: 99.5% availability (API returns non-5xx)
+      - alert: SLOAvailabilityBreach
+        expr: |
+          1 - (sum(rate(http_requests_total{status=~"5.."}[1h])) / sum(rate(http_requests_total[1h]))) < 0.995
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          slo: availability
+        annotations:
+          summary: "SLO breach: availability < 99.5% over last hour"
+          description: "Current availability: {{ $value | humanizePercentage }}"
+
+      # SLO: p99 latency < 5s
+      - alert: SLOLatencyBreach
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[1h])) by (le)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          slo: latency
+        annotations:
+          summary: "SLO breach: p99 latency > 5s"
+          description: "p99 latency: {{ $value }}s"

@@ -55,6 +55,8 @@ model Tenant {
   hosts        Host[]
   containers   Container[]
   jobs         Job[]
+  auditLogs    AuditLog[]
+  usageEvents  UsageEvent[]
 
   @@map("tenants")
 }
@@ -101,6 +103,9 @@ model Host {
   status       HostStatus @default(PENDING)
   lastHeartbeat DateTime? @map("last_heartbeat")
   metadata     Json?
+  cpuCapacity      Int?   @map("cpu_capacity")       // total CPU shares available (e.g. 1024 per core)
+  memoryCapacity   BigInt? @map("memory_capacity")   // total memory in bytes
+  diskCapacity     BigInt? @map("disk_capacity")     // total disk in bytes
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
   tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -173,10 +178,74 @@ model Job {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([jobId])
   @@index([tenantId])
   @@index([jobType])
   @@index([status])
   @@index([createdAt])
   @@map("jobs")
+}
+
+enum AuditAction {
+  CONTAINER_START
+  CONTAINER_STOP
+  CONTAINER_DELETE
+  HOST_REGISTER
+  HOST_DEREGISTER
+  ENVIRONMENT_CREATE
+  ENVIRONMENT_UPDATE
+  ENVIRONMENT_DELETE
+  USER_CREATE
+  USER_UPDATE
+  USER_DELETE
+  SECRET_CREATE
+  SECRET_DELETE
+}
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  tenantId   String      @map("tenant_id") @db.Uuid
+  userId     String?     @map("user_id") @db.Uuid
+  action     AuditAction
+  resource   String      // e.g. "container", "host", "environment"
+  resourceId String?     @map("resource_id")
+  metadata   Json?       // extra context: old values, request IP, etc.
+  result     String      // "success" | "failure"
+  error      String?
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, action])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+enum UsageEventType {
+  CONTAINER_START
+  CONTAINER_STOP
+  CONTAINER_DELETE
+}
+
+model UsageEvent {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  containerId     String?        @map("container_id") @db.Uuid
+  eventType       UsageEventType @map("event_type")
+  cpuShares       Int?           @map("cpu_shares")
+  memoryBytes     BigInt?        @map("memory_bytes")
+  durationSeconds Int?           @map("duration_seconds") // populated on STOP events
+  billingHours    Decimal?       @map("billing_hours")    // computed from duration
+  costCents       Decimal?       @map("cost_cents")       // computed from pricing
+  metadata        Json?          // extra context: image, host ID, etc.
+  timestamp       DateTime       @default(now())
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, eventType])
+  @@index([tenantId, timestamp])
+  @@index([containerId])
+  @@map("usage_events")
 }

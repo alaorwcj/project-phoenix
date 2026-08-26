@@ -33,3 +33,12 @@ logs/
 # Protocol buffers generated
 **/*.pb.go
 **/*_pb2.py
+
+# TLS/mTLS Certificates (Phase 7)
+# Never commit certificates to git!
+certs/
+*.pem
+*.crt
+*.key
+*.csr
+*.srl

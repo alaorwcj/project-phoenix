@@ -14,7 +14,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     const payload = jwt.verify(token, env.JWT_SECRET) as AuthTokenPayload;
     if (!payload.sub || !payload.tenantId || !payload.role) throw new Error('Invalid token claims');
     request.auth = { userId: payload.sub, tenantId: payload.tenantId, role: payload.role };
+    request.user = { id: payload.sub, tenantId: payload.tenantId, role: payload.role };
   } catch {
     return reply.code(401).send({ error: 'Invalid or expired token' });
   }
 }
+
+export const authMiddleware = authenticate;

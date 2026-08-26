@@ -2,22 +2,62 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { createContainerService } from '../services/containerService';
 import { getJobQueue, JobType, ContainerStartJobData, ContainerStopJobData } from '../lib/jobQueue';
 import { PrismaClient } from '@prisma/client';
+import { type StructuredLogger } from '../lib/logger';
+import { getRequestTraceId } from '../lib/trace';
+import { validateBody, StartContainerSchema, StopContainerSchema } from '../lib/validation';
+import { checkRateLimit, RATE_LIMITS } from '../lib/rateLimit';
+import { writeAuditLog } from '../lib/audit';
+import { checkResourceAllocation } from '../lib/resourceManager';
+import { recordContainerStart, recordContainerStop } from '../lib/costTracking';
+import { parsePaginationParams, buildPaginatedResponse } from '../lib/pagination';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
 
 export async function startContainerHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const { tenantId } = request.user as any;
-    
+    const { tenantId, id: userId } = request.user as any;
+
     if (!request.body) {
       return reply.status(400).send({ error: 'Request body required' });
     }
 
-    const { name, image, hostId, environmentVars, resourceLimits, portBindings } = request.body as any;
+    // Rate limit check
+    const rl = checkRateLimit('tenant:container-ops:' + tenantId, RATE_LIMITS.CONTAINER_OPS);
+    if (!rl.allowed) {
+      reply.header('Retry-After', Math.ceil((rl.retryAfterMs ?? 60000) / 1000).toString());
+      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfterMs: rl.retryAfterMs });
+    }
 
-    if (!name || !image || !hostId) {
-      return reply.status(400).send({ error: 'Missing required fields: name, image, hostId' });
+    // Validate input
+    const validation = validateBody(StartContainerSchema, request.body);
+    if ('error' in validation) {
+      return reply.status(400).send({ error: validation.error });
+    }
+
+    const { name, image, hostId, environmentVars, resourceLimits, portBindings } = validation.data;
+
+    // Check resource allocation on target host
+    const allocation = await checkResourceAllocation(hostId, tenantId, {
+      cpuShares: resourceLimits?.cpuShares,
+      memory: resourceLimits?.memory,
+    });
+
+    if (!allocation.allowed) {
+      await writeAuditLog({
+        tenantId,
+        userId,
+        action: 'CONTAINER_START',
+        resource: 'container',
+        metadata: { name, image, hostId, reason: allocation.reason },
+        result: 'failure',
+        error: allocation.reason,
+      });
+      return reply.status(402).send({
+        error: 'Insufficient host capacity',
+        details: allocation.reason,
+        remaining: allocation.remaining,
+      });
     }
 
     // Create container in PENDING state
@@ -26,8 +66,8 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       image,
       hostId,
       environmentVars: environmentVars || {},
-      resourceLimits: resourceLimits || {},
-      portBindings: portBindings || {},
+      resourceLimits: (resourceLimits || {}) as any,
+      portBindings: (portBindings || {}) as any,
     });
 
     // Enqueue job to handle actual container creation
@@ -38,12 +78,33 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       hostId,
       image,
       environmentVars: environmentVars || {},
-      resourceLimits: resourceLimits || {},
+      resourceLimits: (resourceLimits || {}) as any,
     };
 
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_START, jobData, {
       priority: 5,
       delay: 1000, // Give DB a moment to settle
+      traceId: getRequestTraceId(request as unknown as object),
+    });
+
+    // Record cost-tracking event (snapshot of resources at start time)
+    await recordContainerStart({
+      tenantId,
+      containerId: container.id,
+      cpuShares: resourceLimits?.cpuShares,
+      memoryBytes: resourceLimits?.memory,
+      image,
+      hostId,
+    });
+
+    await writeAuditLog({
+      tenantId,
+      userId,
+      action: 'CONTAINER_START',
+      resource: 'container',
+      resourceId: container.id,
+      metadata: { name, image, hostId, jobId: job.id },
+      result: 'success',
     });
 
     return reply.status(201).send({
@@ -52,27 +113,46 @@ export async function startContainerHandler(request: FastifyRequest, reply: Fast
       jobStatus: 'queued',
     });
   } catch (error) {
-    console.error('Error starting container:', error);
+    const { tenantId, id: userId } = (request.user as any) ?? {};
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error starting container');
+    await writeAuditLog({
+      tenantId: tenantId ?? 'unknown',
+      userId,
+      action: 'CONTAINER_START',
+      resource: 'container',
+      metadata: { error: (error as Error).message },
+      result: 'failure',
+      error: (error as Error).message,
+    });
     return reply.status(500).send({ error: (error as Error).message || 'Failed to start container' });
   }
 }
 
 export async function stopContainerHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const { tenantId } = request.user as any;
-    
+    const { tenantId, id: userId } = request.user as any;
+
     if (!request.body) {
       return reply.status(400).send({ error: 'Request body required' });
     }
 
-    const { containerId, timeoutSeconds } = request.body as any;
-
-    if (!containerId) {
-      return reply.status(400).send({ error: 'Missing required field: containerId' });
+    // Rate limit check
+    const rl = checkRateLimit('tenant:container-ops:' + tenantId, RATE_LIMITS.CONTAINER_OPS);
+    if (!rl.allowed) {
+      reply.header('Retry-After', Math.ceil((rl.retryAfterMs ?? 60000) / 1000).toString());
+      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfterMs: rl.retryAfterMs });
     }
 
+    // Validate input
+    const validation = validateBody(StopContainerSchema, request.body);
+    if ('error' in validation) {
+      return reply.status(400).send({ error: validation.error });
+    }
+
+    const { containerId, timeoutSeconds } = validation.data;
+
     // Verify container belongs to tenant and get current state
-    const container = await containerService.getContainer(tenantId, containerId);
+    await containerService.getContainer(tenantId, containerId);
 
     // Update to STOPPING immediately for UI feedback
     const stoppingContainer = await containerService.updateContainerStatus(
@@ -91,6 +171,23 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
 
     const job = await jobQueue.enqueueJob(JobType.CONTAINER_STOP, jobData, {
       priority: 5,
+      traceId: getRequestTraceId(request as unknown as object),
+    });
+
+    // Record cost-tracking event (with duration calculated at stop time)
+    await recordContainerStop({
+      tenantId,
+      containerId,
+    });
+
+    await writeAuditLog({
+      tenantId,
+      userId,
+      action: 'CONTAINER_STOP',
+      resource: 'container',
+      resourceId: containerId,
+      metadata: { timeoutSeconds: timeoutSeconds || 15, jobId: job.id },
+      result: 'success',
     });
 
     return reply.status(200).send({
@@ -99,7 +196,18 @@ export async function stopContainerHandler(request: FastifyRequest, reply: Fasti
       jobStatus: 'queued',
     });
   } catch (error) {
-    console.error('Error stopping container:', error);
+    const { tenantId, id: userId } = (request.user as any) ?? {};
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error stopping container');
+
+    await writeAuditLog({
+      tenantId: tenantId ?? 'unknown',
+      userId,
+      action: 'CONTAINER_STOP',
+      resource: 'container',
+      metadata: { error: (error as Error).message },
+      result: 'failure',
+      error: (error as Error).message,
+    });
 
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Container not found' });
@@ -121,7 +229,7 @@ export async function getContainerHandler(request: FastifyRequest, reply: Fastif
     const container = await containerService.getContainer(tenantId, id);
     return reply.status(200).send(container);
   } catch (error) {
-    console.error('Error getting container:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error getting container');
     
     if ((error as Error).message.includes('not found')) {
       return reply.status(404).send({ error: 'Container not found' });
@@ -134,10 +242,11 @@ export async function getContainerHandler(request: FastifyRequest, reply: Fastif
 export async function listContainersHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
     const { tenantId } = request.user as any;
-    const { hostId } = request.query as { hostId?: string };
+    const { hostId, status } = request.query as { hostId?: string; status?: string };
+    const { limit, offset } = parsePaginationParams(request.query as Record<string, unknown>);
 
     let containers;
-    
+
     if (hostId) {
       // Verify the host belongs to the tenant
       const host = await prisma.host.findFirst({
@@ -153,12 +262,19 @@ export async function listContainersHandler(request: FastifyRequest, reply: Fast
       containers = await containerService.listContainers(tenantId);
     }
 
-    return reply.status(200).send({
-      containers,
-      total: containers.length,
-    });
+    // Apply optional status filter (in-memory; dataset is tenant-scoped)
+    if (status) {
+      containers = containers.filter((c: any) => c.status === status.toUpperCase());
+    }
+
+    const total = containers.length;
+    const paged = containers.slice(offset, offset + limit);
+
+    return reply.status(200).send(
+      buildPaginatedResponse(paged, limit, offset, total)
+    );
   } catch (error) {
-    console.error('Error listing containers:', error);
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error listing containers');
     return reply.status(500).send({ error: (error as Error).message || 'Failed to list containers' });
   }
 }

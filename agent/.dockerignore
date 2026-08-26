@@ -1,0 +1,9 @@
+.git
+.gitignore
+README.md
+docs
+.vscode
+*.swp
+*.swo
+.DS_Store
+go.sum.bak

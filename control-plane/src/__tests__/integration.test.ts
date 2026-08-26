@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+// @ts-nocheck
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import * as jwt from 'jsonwebtoken';
 import { start, stop, getApp } from '../app';
@@ -366,6 +367,63 @@ describe('Integration Tests - Docker Platform', () => {
 
       expect(user?.role).toBe('ADMIN');
       expect(roles[user?.role as keyof typeof roles]).toBe(1);
+    });
+  });
+
+  describe('Request IDs', () => {
+    it('should return a request id header on responses', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/health',
+        headers: {
+          'x-correlation-id': 'integration-correlation-id',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['x-request-id']).toBe('integration-correlation-id');
+      expect(response.headers['x-correlation-id']).toBe('integration-correlation-id');
+    });
+  });
+
+  describe('Trace Context', () => {
+    it('should echo or generate a trace id header on responses', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/health',
+        headers: {
+          'x-trace-id': 'integration-trace-id',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['x-trace-id']).toBe('integration-trace-id');
+      expect(typeof response.headers['x-trace-id']).toBe('string');
+    });
+
+    it('should generate a trace id when one is not provided', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/health',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(typeof response.headers['x-trace-id']).toBe('string');
+      expect((response.headers['x-trace-id'] as string).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Metrics Endpoint', () => {
+    it('should expose Prometheus metrics', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/metrics',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('text/plain');
+      expect(response.body).toContain('# HELP');
+      expect(response.body).toContain('control_plane_http_requests_total');
     });
   });
 });

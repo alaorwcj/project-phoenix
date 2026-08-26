@@ -1,0 +1,75 @@
+# Default values for docker-platform
+
+replicaCount: 2
+
+image:
+  controlPlane:
+    repository: ghcr.io/alaorwcj/project-phoenix/control-plane
+    pullPolicy: IfNotPresent
+    tag: latest
+  agent:
+    repository: ghcr.io/alaorwcj/project-phoenix/agent
+    pullPolicy: IfNotPresent
+    tag: latest
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Control Plane configuration
+controlPlane:
+  port: 3000
+  grpcPort: 50051
+  logLevel: info
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+# External secrets (use Vault / External Secrets in production)
+secrets:
+  jwtSecret: ""
+  encryptionKey: ""
+  databaseUrl: ""
+
+# TLS/mTLS between agent <-> control plane
+tls:
+  enabled: false
+  certPath: /etc/tls/tls.crt
+  keyPath: /etc/tls/tls.key
+  caPath: /etc/tls/ca.crt
+  existingSecret: ""
+
+# Sub-charts
+postgresql:
+  enabled: true
+  auth:
+    database: docker_platform
+    username: dp_user
+    existingSecret: ""
+
+redis:
+  enabled: true
+  architecture: standalone
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: docker-platform.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

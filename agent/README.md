@@ -41,6 +41,9 @@ DOCKER_HOST=unix:///var/run/docker.sock
 
 # Heartbeat frequency
 HEARTBEAT_INTERVAL=30s
+
+# Optional local Prometheus endpoint
+METRICS_PORT=9090
 ```
 
 ### Example: Development with HTTP Transport
@@ -231,6 +234,7 @@ _, err := dockerClient.GetContainerLogs(ctx, containerID)
 | `AGENT_ID` | `agent-001` | Unique agent identifier |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine socket/URL |
 | `HEARTBEAT_INTERVAL` | `30s` | Time between heartbeats |
+| `METRICS_PORT` | _disabled_ | Optional local Prometheus metrics endpoint |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
 
 ### Example Configurations

@@ -7,6 +7,12 @@ declare module 'fastify' {
       tenantId: string;
       role: UserRole;
     };
+    user?: {
+      id?: string;
+      userId?: string;
+      tenantId: string;
+      role: UserRole;
+    };
   }
 }
 
