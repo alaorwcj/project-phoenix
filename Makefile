@@ -2,12 +2,12 @@
 # Provides convenient commands for development, testing, and deployment
 
 .PHONY: help setup setup-postgres setup-control-plane setup-agent \
-	dev dev-control-plane dev-agent \
+	dev dev-control-plane dev-agent dev-dashboard \
 	test test-control-plane test-agent \
 	db-migrate db-seed db-reset db-studio \
 	docker-up docker-down docker-clean \
-	build build-agent build-control-plane \
-	clean logs
+	build build-agent build-control-plane build-dashboard \
+	deploy deploy-prod clean logs
 
 .DEFAULT_GOAL := help
 
@@ -52,6 +52,10 @@ dev-control-plane: ## Start Control Plane dev server
 dev-agent: ## Start Host Agent
 	@echo "🚀 Starting Host Agent"
 	cd agent && go run cmd/agent/main.go
+
+dev-dashboard: ## Start Dashboard dev server
+	@echo "🚀 Starting Dashboard (http://localhost:5173)"
+	cd dashboard && npm run dev
 
 # Test Commands
 test: test-control-plane test-agent ## Run all tests (control-plane + agent)
@@ -127,6 +131,11 @@ build-agent-arm: ## Build Agent for ARM (Raspberry Pi)
 	cd agent && GOOS=linux GOARCH=arm64 go build -o bin/agent-arm64 cmd/agent/main.go
 	@echo "✅ Build complete: agent/bin/agent-arm64"
 
+build-dashboard: ## Build Dashboard (React)
+	@echo "🔨 Building Dashboard..."
+	cd dashboard && npm run build
+	@echo "✅ Build complete: dashboard/dist"
+
 # Utility Commands
 clean: ## Clean build artifacts
 	@echo "🧹 Cleaning build artifacts..."
@@ -151,6 +160,18 @@ status: ## Show status of all services
 
 # Combined Workflows
 quick-start: setup docker-up dev-control-plane ## Full quick start: setup + docker-up + dev
+
+deploy: build-dashboard ## Build dashboard and start full stack via docker-compose
+	@echo "🚀 Starting production stack..."
+	docker compose up -d
+	@echo "✅ Dashboard: http://localhost:8080"
+	@echo "✅ Control Plane: http://localhost:3000"
+
+deploy-prod: ## Deploy with production overrides (requires .env)
+	@echo "🚀 Starting production stack with overrides..."
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+	@docker compose ps
+	@echo "✅ Production stack deployed"
 
 validate: build test ## Build and run all tests
 
