@@ -5,7 +5,7 @@ import { requireRole } from '../middleware/rbac';
 import { listTenantsHandler, getTenantHandler, createTenantHandler } from '../handlers/tenantHandlers';
 import { listEnvironmentsHandler, getEnvironmentHandler, createEnvironmentHandler } from '../handlers/environmentHandlers';
 import { listHostsHandler, getHostHandler, registerHostHandler } from '../handlers/hostHandlers';
-import { startContainerHandler, stopContainerHandler, getContainerHandler, listContainersHandler } from '../handlers/containerHandlers';
+import { startContainerHandler, stopContainerHandler, getContainerHandler, listContainersHandler, getContainerLogsHandler } from '../handlers/containerHandlers';
 import { evaluateHostHealth, planFailover, findMigrationTargets } from '../lib/hostHealth';
 import { getTenantUsageSummary } from '../lib/costTracking';
 import { UserRole } from '@prisma/client';
@@ -55,6 +55,7 @@ export async function setupRoutes(app: FastifyInstance) {
   app.post('/api/containers/start', { onRequest: authenticate, preHandler: requireRole(UserRole.OPERATOR) }, startContainerHandler);
   app.post('/api/containers/stop', { onRequest: authenticate, preHandler: requireRole(UserRole.OPERATOR) }, stopContainerHandler);
   app.get<{ Params: { id: string } }>('/api/containers/:id', { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) }, getContainerHandler);
+  app.get<{ Params: { id: string } }>('/api/containers/:id/logs', { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) }, getContainerLogsHandler);
   app.get('/api/containers', { onRequest: authenticate, preHandler: requireRole(UserRole.VIEWER) }, listContainersHandler);
 
   // Host-health operations (admin only — operators must not silently fail hosts over)
