@@ -11,24 +11,36 @@ import (
 )
 
 // CommandHandler processes container operations received from the Control Plane.
-// It bridges gRPC requests to Docker Engine API calls.
+// It implements pb.HostAgentServiceServer and bridges gRPC requests to Docker Engine API calls.
 type CommandHandler struct {
 	dockerClient *docker.Client
-	logger       *logging.Logger
+	logger       logging.Logger
 }
 
+// Compile-time assertion that CommandHandler implements the server interface
+var _ pb.HostAgentServiceServer = (*CommandHandler)(nil)
+
 // NewCommandHandler creates a handler that executes container commands via Docker.
-func NewCommandHandler(dockerClient *docker.Client, logger *logging.Logger) *CommandHandler {
+func NewCommandHandler(dockerClient *docker.Client, logger logging.Logger) *CommandHandler {
 	return &CommandHandler{
 		dockerClient: dockerClient,
 		logger:       logger,
 	}
 }
 
-// HandleStartContainer processes a StartContainer command from the Control Plane.
-// It looks up the container by ID, pulls the image if needed, creates the container,
-// and starts it.
-func (h *CommandHandler) HandleStartContainer(ctx context.Context, req *pb.StartContainerRequest) (*pb.ContainerActionResponse, error) {
+// RegisterHost is a no-op on the agent side. The Control Plane implements this.
+// The agent is a client of RegisterHost, not a server.
+func (h *CommandHandler) RegisterHost(ctx context.Context, req *pb.RegisterHostRequest) (*pb.RegisterHostResponse, error) {
+	return nil, fmt.Errorf("RegisterHost is not implemented on agent side")
+}
+
+// Heartbeat is a no-op on the agent side. The Control Plane implements this.
+func (h *CommandHandler) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
+	return nil, fmt.Errorf("Heartbeat is not implemented on agent side")
+}
+
+// StartContainer processes a StartContainer command from the Control Plane.
+func (h *CommandHandler) StartContainer(ctx context.Context, req *pb.StartContainerRequest) (*pb.ContainerActionResponse, error) {
 	h.logger.Info("Received StartContainer command",
 		"commandId", req.CommandId,
 		"hostId", req.HostId,
@@ -42,9 +54,8 @@ func (h *CommandHandler) HandleStartContainer(ctx context.Context, req *pb.Start
 	// Start the container via Docker Engine API
 	err := h.dockerClient.StartContainer(opCtx, req.ContainerId)
 	if err != nil {
-		h.logger.Error("Failed to start container",
+		h.logger.Error("Failed to start container", err,
 			"containerId", req.ContainerId,
-			"error", err,
 		)
 		return &pb.ContainerActionResponse{
 			CommandId:   req.CommandId,
@@ -67,9 +78,9 @@ func (h *CommandHandler) HandleStartContainer(ctx context.Context, req *pb.Start
 	}, nil
 }
 
-// HandleStopContainer processes a StopContainer command from the Control Plane.
+// StopContainer processes a StopContainer command from the Control Plane.
 // It attempts graceful shutdown with the specified timeout, falling back to kill.
-func (h *CommandHandler) HandleStopContainer(ctx context.Context, req *pb.StopContainerRequest) (*pb.ContainerActionResponse, error) {
+func (h *CommandHandler) StopContainer(ctx context.Context, req *pb.StopContainerRequest) (*pb.ContainerActionResponse, error) {
 	h.logger.Info("Received StopContainer command",
 		"commandId", req.CommandId,
 		"hostId", req.HostId,
@@ -97,9 +108,8 @@ func (h *CommandHandler) HandleStopContainer(ctx context.Context, req *pb.StopCo
 		// Force kill as last resort
 		killErr := h.dockerClient.KillContainer(opCtx, req.ContainerId)
 		if killErr != nil {
-			h.logger.Error("Force kill also failed",
+			h.logger.Error("Force kill also failed", killErr,
 				"containerId", req.ContainerId,
-				"error", killErr,
 			)
 			return &pb.ContainerActionResponse{
 				CommandId:   req.CommandId,
@@ -123,8 +133,8 @@ func (h *CommandHandler) HandleStopContainer(ctx context.Context, req *pb.StopCo
 	}, nil
 }
 
-// HandleGetContainerLogs streams container logs back to the Control Plane.
-func (h *CommandHandler) HandleGetContainerLogs(ctx context.Context, req *pb.GetContainerLogsRequest) (<-chan *pb.ContainerLogEntry, error) {
+// GetContainerLogs streams container logs back to the Control Plane.
+func (h *CommandHandler) GetContainerLogs(req *pb.GetContainerLogsRequest, stream pb.HostAgentService_GetContainerLogsServer) error {
 	h.logger.Info("Received GetContainerLogs request",
 		"hostId", req.HostId,
 		"containerId", req.ContainerId,
@@ -137,6 +147,7 @@ func (h *CommandHandler) HandleGetContainerLogs(ctx context.Context, req *pb.Get
 		tail = fmt.Sprintf("%d", req.Tail)
 	}
 
+	ctx := stream.Context()
 	reader, err := h.dockerClient.GetContainerLogs(ctx, req.ContainerId, &docker.LogsOptions{
 		Follow: req.Follow,
 		Tail:   tail,
@@ -144,37 +155,31 @@ func (h *CommandHandler) HandleGetContainerLogs(ctx context.Context, req *pb.Get
 		Stderr: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get container logs: %w", err)
+		return fmt.Errorf("failed to get container logs: %w", err)
 	}
+	defer reader.Close()
 
-	entries := make(chan *pb.ContainerLogEntry, 64)
-
-	go func() {
-		defer close(entries)
-		defer reader.Close()
-
-		buf := make([]byte, 32*1024) // 32KB buffer
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				n, err := reader.Read(buf)
-				if n > 0 {
-					entry := &pb.ContainerLogEntry{
-						ContainerId: req.ContainerId,
-						Data:        make([]byte, n),
-						Stream:      "stdout",
-					}
-					copy(entry.Data, buf[:n])
-					entries <- entry
+	buf := make([]byte, 32*1024) // 32KB buffer
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			n, readErr := reader.Read(buf)
+			if n > 0 {
+				entry := &pb.ContainerLogEntry{
+					ContainerId: req.ContainerId,
+					Data:        make([]byte, n),
+					Stream:      "stdout",
 				}
-				if err != nil {
-					return
+				copy(entry.Data, buf[:n])
+				if sendErr := stream.Send(entry); sendErr != nil {
+					return fmt.Errorf("failed to send log entry: %w", sendErr)
 				}
 			}
+			if readErr != nil {
+				return nil // EOF or other read completion
+			}
 		}
-	}()
-
-	return entries, nil
+	}
 }

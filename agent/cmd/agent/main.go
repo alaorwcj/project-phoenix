@@ -46,7 +46,7 @@ func main() {
 	}
 	defer dockerClient.Close()
 
-	// Prepare TLS config for gRPC client
+	// Prepare TLS config for gRPC client and server
 	tlsConfig := &grpc.TLSConfig{
 		Enabled:  cfg.TLSEnabled,
 		CertPath: cfg.TLSCertPath,
@@ -54,6 +54,23 @@ func main() {
 		CAPath:   cfg.TLSCAPath,
 	}
 
+	// Start gRPC server to receive commands from Control Plane
+	grpcServer, err := grpc.NewServer(cfg.Port, dockerClient, tlsConfig, log)
+	if err != nil {
+		reg.IncCounter("agent_startup_total", metrics.Labels{"state": "failed"})
+		log.Error("Failed to create gRPC server", err)
+		os.Exit(1)
+	}
+
+	// Run server in background
+	go func() {
+		log.Info("gRPC command server listening on", "port", cfg.Port)
+		if err := grpcServer.Start(); err != nil {
+			log.Error("gRPC server error", err)
+		}
+	}()
+
+	// Create gRPC client to connect to Control Plane
 	grpcClient, err := grpc.NewClient(cfg.ControlPlaneAddr, cfg.AgentID, tlsConfig, reg, traceID)
 	if err != nil {
 		reg.IncCounter("agent_startup_total", metrics.Labels{"state": "failed"})
@@ -82,6 +99,7 @@ func main() {
 	<-sigChan
 
 	log.Info("Shutting down agent")
+	grpcServer.Stop()
 	cancel()
 }
 
