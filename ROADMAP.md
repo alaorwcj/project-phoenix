@@ -271,25 +271,31 @@ This document outlines the remaining work to build out the Docker Platform multi
 
 ---
 
-## Phase 11: UI & Developer Experience
+## Phase 11: UI & Developer Experience ✅
 
-**Status**: Planning
+**Status**: Complete
 **Estimated**: 2-4 weeks
 **Priority**: LOW (after core features)
 
-### 11.1 Control Plane REST API
-- [ ] Document all endpoints (OpenAPI/Swagger)
-- [ ] Add /health, /status endpoints
-- [ ] Pagination for list endpoints
-- [ ] Filtering + sorting
+### 11.1 Control Plane REST API ✅
+- ✅ Document all endpoints (OpenAPI/Swagger with /docs)
+- ✅ Add /health, /status endpoints with monitoring
+- ✅ Pagination for list endpoints (limit/offset, default 20, max 500)
+- ✅ Filtering + sorting (e.g., ?status=RUNNING)
 
-### 11.2 CLI Tool
-- [ ] Go CLI: `docker-platform`
-- [ ] Commands:
-  - `docker-platform login` (JWT auth)
-  - `docker-platform container start`
-  - `docker-platform container logs`
-  - `docker-platform host list`
+### 11.2 CLI Tool ✅
+- ✅ Go CLI: `docker-platform` (cobra framework)
+- ✅ Auth commands:
+  - `docker-platform login` (JWT)
+  - `docker-platform logout`
+- ✅ Container commands:
+  - `docker-platform container-start`
+  - `docker-platform container-stop`
+  - `docker-platform container-list`
+- ✅ Host commands:
+  - `docker-platform host-list`
+  - `docker-platform host-status`
+- ✅ Config commands:
   - `docker-platform config set/get`
 
 ### 11.3 Web Dashboard (Future)
@@ -303,15 +309,22 @@ This document outlines the remaining work to build out the Docker Platform multi
 
 ## Phase 12: Production Deployment
 
-**Status**: Planning
+**Status**: In Progress
 **Estimated**: 2-3 weeks
 **Priority**: HIGH (when core features done)
 
-### 12.1 Containerization
-- [ ] Control Plane: Docker image
-- [ ] Agent: Docker image
-- [ ] Docker Compose: Local development
-- [ ] Helm chart: Kubernetes deployment
+### 12.1 Containerization ✅
+- ✅ Control Plane: Multi-stage Docker image (Node.js build + runtime)
+- ✅ Agent: Multi-stage Docker image (Go binary + alpine)
+- ✅ Docker Compose: Complete local development stack (postgres + redis + control-plane + agent)
+- ✅ Helm chart: Kubernetes deployment with:
+  - Deployment manifest with health checks
+  - Service (ClusterIP) for HTTP + gRPC
+  - HPA (autoscaling 2-10 replicas, 70% CPU target)
+  - Secrets management
+  - PostgreSQL + Redis subchart dependencies
+  - Chart.yaml with bitnami dependencies
+  - values.yaml with production defaults
 
 ### 12.2 Database
 - [ ] PostgreSQL: Production-grade config

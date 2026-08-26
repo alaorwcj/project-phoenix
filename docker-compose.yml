@@ -1,3 +1,9 @@
+# Docker Platform - Local Development Stack
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f control-plane
+#   docker compose down -v  # clean shutdown + remove volumes
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,5 +22,64 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: docker-platform-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  control-plane:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    container_name: docker-platform-control-plane
+    ports:
+      - "3000:3000"
+      - "50051:50051"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/docker_platform
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: dev-only-jwt-secret-minimum-32-chars-long!
+      GRPC_PORT: 50051
+      LOG_LEVEL: debug
+      TLS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: docker-platform-agent
+    ports:
+      - "50052:50051"
+    environment:
+      CONTROL_PLANE_URL: control-plane:50051
+      AGENT_ID: agent-local-001
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      control-plane:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  redis_data:
