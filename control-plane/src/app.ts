@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
 import { env } from './config/env';
 import { setupRoutes } from './routes/api';
 import { setupJobRoutes } from './routes/jobs';
@@ -27,6 +29,38 @@ export async function buildApp() {
   });
 
   setAppLogger(app.log as unknown as StructuredLogger);
+
+  // Register Swagger for API documentation
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: 'Docker Platform Control Plane API',
+        description: 'Multi-tenant Docker container management platform',
+        version: '1.0.0',
+      },
+      servers: [
+        { url: `http://localhost:${env.PORT}`, description: 'Development' },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+          },
+        },
+      },
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
+  await app.register(swaggerUi, {
+    routePrefix: '/docs',
+    uiConfig: {
+      docExpansion: 'list',
+      deepLinking: true,
+    },
+  });
 
   await app.register(cors, { origin: true });
 

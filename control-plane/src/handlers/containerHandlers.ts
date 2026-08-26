@@ -9,6 +9,7 @@ import { checkRateLimit, RATE_LIMITS } from '../lib/rateLimit';
 import { writeAuditLog } from '../lib/audit';
 import { checkResourceAllocation } from '../lib/resourceManager';
 import { recordContainerStart, recordContainerStop } from '../lib/costTracking';
+import { parsePaginationParams, buildPaginatedResponse } from '../lib/pagination';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -241,10 +242,11 @@ export async function getContainerHandler(request: FastifyRequest, reply: Fastif
 export async function listContainersHandler(request: FastifyRequest, reply: FastifyReply) {
   try {
     const { tenantId } = request.user as any;
-    const { hostId } = request.query as { hostId?: string };
+    const { hostId, status } = request.query as { hostId?: string; status?: string };
+    const { limit, offset } = parsePaginationParams(request.query as Record<string, unknown>);
 
     let containers;
-    
+
     if (hostId) {
       // Verify the host belongs to the tenant
       const host = await prisma.host.findFirst({
@@ -260,10 +262,17 @@ export async function listContainersHandler(request: FastifyRequest, reply: Fast
       containers = await containerService.listContainers(tenantId);
     }
 
-    return reply.status(200).send({
-      containers,
-      total: containers.length,
-    });
+    // Apply optional status filter (in-memory; dataset is tenant-scoped)
+    if (status) {
+      containers = containers.filter((c: any) => c.status === status.toUpperCase());
+    }
+
+    const total = containers.length;
+    const paged = containers.slice(offset, offset + limit);
+
+    return reply.status(200).send(
+      buildPaginatedResponse(paged, limit, offset, total)
+    );
   } catch (error) {
     (request.log as unknown as StructuredLogger).error({ err: error }, 'Error listing containers');
     return reply.status(500).send({ error: (error as Error).message || 'Failed to list containers' });

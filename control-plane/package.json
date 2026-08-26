@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@fastify/cors": "^9.0.0",
+    "@fastify/swagger": "^9.8.1",
+    "@fastify/swagger-ui": "^6.1.1",
     "@grpc/grpc-js": "^1.9.0",
     "@grpc/proto-loader": "^0.7.0",
     "@prisma/client": "^5.0.0",

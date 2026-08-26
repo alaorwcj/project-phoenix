@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { PrismaClient } from '@prisma/client';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
 import { listTenantsHandler, getTenantHandler, createTenantHandler } from '../handlers/tenantHandlers';
@@ -9,8 +10,35 @@ import { evaluateHostHealth, planFailover, findMigrationTargets } from '../lib/h
 import { getTenantUsageSummary } from '../lib/costTracking';
 import { UserRole } from '@prisma/client';
 
+const prisma = new PrismaClient();
+
 export async function setupRoutes(app: FastifyInstance) {
-  app.get('/api/health', async () => ({ status: 'ok' }));
+  // Health check endpoint (no auth required)
+  app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
+  // Status endpoint — detailed health info for monitoring
+  app.get(
+    '/api/status',
+    async () => {
+      try {
+        const dbHealth = await prisma.$queryRaw`SELECT 1`;
+        return {
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          services: {
+            database: 'connected',
+            grpc: 'running',
+          },
+        };
+      } catch {
+        return {
+          status: 'unhealthy',
+          timestamp: new Date().toISOString(),
+          services: { database: 'failed' },
+        };
+      }
+    }
+  );
 
   app.post<{ Body: { name: string; slug: string } }>('/api/tenants', { onRequest: authenticate, preHandler: requireRole(UserRole.ADMIN) }, createTenantHandler);
   app.get('/api/tenants', { onRequest: authenticate }, listTenantsHandler);
