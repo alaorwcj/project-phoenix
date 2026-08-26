@@ -27,7 +27,5 @@ type HostAgentServiceServer interface {
 	GetContainerLogs(*GetContainerLogsRequest, HostAgentService_GetContainerLogsServer) error
 }
 
-// HostAgentService_GetContainerLogsServer is the server stream for container logs
-type HostAgentService_GetContainerLogsServer interface {
-	Send(*ContainerLogEntry) error
-}
+// Note: HostAgentService_GetContainerLogsServer is defined in server_impl.go
+// (it embeds grpc.ServerStream for the real gRPC server registration).

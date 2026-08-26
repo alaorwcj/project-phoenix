@@ -41,17 +41,10 @@ func NewServer(port string, dockerClient *docker.Client, tlsConfig *TLSConfig, l
 	// Create command handler
 	handler := NewCommandHandler(dockerClient, log)
 
-	// NOTE: RegisterHostAgentServiceServer does not exist in manually-generated grpcgen types.
-	// This is a limitation of the manual proto generation workaround for Windows protoc crash.
-	// In production, use real protoc-generated code from google.golang.org/grpc/cmd/protoc-gen-go-grpc
-	//
-	// For now, the server is created but NOT registered with a service descriptor.
-	// This means incoming gRPC calls will not be routed to the handler.
-	// TODO: Fix once protoc is working on Windows (upgrade to v37+) or use WSL2.
-	_ = handler
-	_ = pb.HostAgentServiceServer(nil)
+	// Register the command handler as the HostAgentService implementation
+	pb.RegisterHostAgentServiceServer(grpcServer, handler)
 
-	log.Info("gRPC command server initialized (handlers not registered - protoc limitation)", "port", port)
+	log.Info("gRPC command server initialized", "port", port)
 
 	return &Server{
 		grpcServer:     grpcServer,
