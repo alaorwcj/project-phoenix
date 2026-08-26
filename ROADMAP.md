@@ -247,11 +247,17 @@ This document outlines the remaining work to build out the Docker Platform multi
 - ✅ Backwards-compatible: hosts without capacity limits accept all allocations
 - ✅ Tests: `src/__tests__/phase10-resources.test.ts`
 
-### 10.2 Multi-Host Orchestration
-- [ ] Agent pool management
-- [ ] Host health checks
-- [ ] Container migration (planned/emergency)
-- [ ] Load balancing across hosts
+### 10.2 Multi-Host Orchestration ✅
+- ✅ Host health monitoring — `evaluateHostHealth()` marks stale agents OFFLINE (60s timeout)
+- ✅ Failover planning — `planFailover()` identifies containers + target hosts
+- ✅ Migration targeting — `findMigrationTargets()` considers capacity and tenant isolation
+- ✅ Periodic sweeper — 30s health check integrated into app startup
+- ✅ Reconciliation — `reconcileFreshHosts()` recovers agents with fresh heartbeats
+- ✅ Admin REST endpoints:
+  - POST /api/hosts/health/sweep (manual trigger)
+  - GET  /api/hosts/:id/failover-plan
+  - GET  /api/hosts/:id/migration-targets
+- ✅ Tests: `src/__tests__/phase10-host-health.test.ts`
 
 ### 10.3 Cost Management
 - [ ] Per-tenant usage tracking
