@@ -1,0 +1,70 @@
+# Prometheus Configuration for docker-platform
+# Deploy as ConfigMap in Kubernetes or standalone
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'production'
+    service: 'docker-platform'
+
+# Alert manager for notifications
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+# Load alert rules
+rule_files:
+  - '/etc/prometheus/rules/*.yaml'
+
+scrape_configs:
+  # Control Plane metrics
+  - job_name: 'control-plane'
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Agent metrics (autodiscover via DNS)
+  - job_name: 'agents'
+    consul_sd_configs:
+      - server: 'consul:8500'
+        datacenter: 'dc1'
+        tags: ['docker-platform-agent']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # PostgreSQL Exporter
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+
+  # Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+
+  # Node Exporter (host metrics)
+  - job_name: 'node'
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '([^:]+)(?::\d+)?'
+        replacement: '${1}:9100'
+        target_label: __address__
+    static_configs:
+      - targets: []  # autodiscover or configure manually
+
+# Remote storage (optional: for long-term retention)
+# remote_write:
+#   - url: "http://thanos-receive:19291/api/v1/receive"
+
+# PromQL query examples for dashboarding:
+# 1. Request rate: rate(http_requests_total[5m])
+# 2. Error rate: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+# 3. p99 latency: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+# 4. Active containers: count(container_status)
+# 5. Host CPU usage: sum(host_cpu_used) / sum(host_cpu_capacity)

@@ -1,0 +1,110 @@
+# Grafana Dashboard Config for docker-platform
+# JSON serialized dashboard — import via UI or provisioning
+{
+  "dashboard": {
+    "title": "Docker Platform - Production Overview",
+    "timezone": "UTC",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "title": "API Request Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (job)",
+            "legendFormat": "{{ job }} requests/sec"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "title": "API Error Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (status) / sum(rate(http_requests_total[5m]))",
+            "legendFormat": "Error {{ $labels.status }}"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "title": "gRPC Operations",
+        "targets": [
+          {
+            "expr": "rate(grpc_operations_total[5m]) by (operation, status)",
+            "legendFormat": "{{ operation }} - {{ status }}"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "title": "Job Queue Status",
+        "targets": [
+          {
+            "expr": "job_queue_enqueued_total - job_queue_completed_total - job_queue_failed_total",
+            "legendFormat": "Pending"
+          },
+          {
+            "expr": "rate(job_queue_completed_total[5m])",
+            "legendFormat": "Completed/sec"
+          },
+          {
+            "expr": "rate(job_queue_failed_total[5m])",
+            "legendFormat": "Failed/sec"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "title": "Host Status",
+        "targets": [
+          {
+            "expr": "sum by (status) (host_status)",
+            "legendFormat": "{{ status }}"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 16, "w": 6, "h": 6}
+      },
+      {
+        "title": "Active Containers",
+        "targets": [
+          {
+            "expr": "sum(container_status != 'STOPPED')",
+            "legendFormat": "Running"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 16, "w": 6, "h": 6}
+      },
+      {
+        "title": "Database Connections",
+        "targets": [
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Active"
+          }
+        ],
+        "type": "gauge",
+        "gridPos": {"x": 12, "y": 16, "w": 6, "h": 6},
+        "options": {"maxValue": 200}
+      },
+      {
+        "title": "Disk Usage",
+        "targets": [
+          {
+            "expr": "node_filesystem_avail_bytes / node_filesystem_size_bytes",
+            "legendFormat": "{{ device }}"
+          }
+        ],
+        "type": "gauge",
+        "gridPos": {"x": 18, "y": 16, "w": 6, "h": 6}
+      }
+    ]
+  }
+}
