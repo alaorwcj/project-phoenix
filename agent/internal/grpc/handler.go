@@ -42,9 +42,9 @@ func (h *CommandHandler) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest
 // StartContainer processes a StartContainer command from the Control Plane.
 func (h *CommandHandler) StartContainer(ctx context.Context, req *pb.StartContainerRequest) (*pb.ContainerActionResponse, error) {
 	h.logger.Info("Received StartContainer command",
-		"commandId", req.CommandId,
-		"hostId", req.HostId,
-		"containerId", req.ContainerId,
+		"commandID", req.CommandID,
+		"hostID", req.HostID,
+		"containerID", req.ContainerID,
 	)
 
 	// Create a timeout context for Docker operations
@@ -52,27 +52,27 @@ func (h *CommandHandler) StartContainer(ctx context.Context, req *pb.StartContai
 	defer cancel()
 
 	// Start the container via Docker Engine API
-	err := h.dockerClient.StartContainer(opCtx, req.ContainerId)
+	err := h.dockerClient.StartContainer(opCtx, req.ContainerID)
 	if err != nil {
 		h.logger.Error("Failed to start container", err,
-			"containerId", req.ContainerId,
+			"containerID", req.ContainerID,
 		)
 		return &pb.ContainerActionResponse{
-			CommandId:   req.CommandId,
-			ContainerId: req.ContainerId,
+			CommandID:   req.CommandID,
+			ContainerID: req.ContainerID,
 			Success:     false,
 			Message:     fmt.Sprintf("Failed to start container: %v", err),
 		}, nil
 	}
 
 	h.logger.Info("Container started successfully",
-		"commandId", req.CommandId,
-		"containerId", req.ContainerId,
+		"commandID", req.CommandID,
+		"containerID", req.ContainerID,
 	)
 
 	return &pb.ContainerActionResponse{
-		CommandId:   req.CommandId,
-		ContainerId: req.ContainerId,
+		CommandID:   req.CommandID,
+		ContainerID: req.ContainerID,
 		Success:     true,
 		Message:     "Container started successfully",
 	}, nil
@@ -82,9 +82,9 @@ func (h *CommandHandler) StartContainer(ctx context.Context, req *pb.StartContai
 // It attempts graceful shutdown with the specified timeout, falling back to kill.
 func (h *CommandHandler) StopContainer(ctx context.Context, req *pb.StopContainerRequest) (*pb.ContainerActionResponse, error) {
 	h.logger.Info("Received StopContainer command",
-		"commandId", req.CommandId,
-		"hostId", req.HostId,
-		"containerId", req.ContainerId,
+		"commandID", req.CommandID,
+		"hostID", req.HostID,
+		"containerID", req.ContainerID,
 		"timeoutSeconds", req.TimeoutSeconds,
 	)
 
@@ -98,22 +98,22 @@ func (h *CommandHandler) StopContainer(ctx context.Context, req *pb.StopContaine
 	defer cancel()
 
 	// Attempt graceful stop
-	err := h.dockerClient.StopContainer(opCtx, req.ContainerId, timeout)
+	err := h.dockerClient.StopContainer(opCtx, req.ContainerID, timeout)
 	if err != nil {
 		h.logger.Warn("Graceful stop failed, attempting force kill",
-			"containerId", req.ContainerId,
+			"containerID", req.ContainerID,
 			"error", err,
 		)
 
 		// Force kill as last resort
-		killErr := h.dockerClient.KillContainer(opCtx, req.ContainerId)
+		killErr := h.dockerClient.KillContainer(opCtx, req.ContainerID)
 		if killErr != nil {
 			h.logger.Error("Force kill also failed", killErr,
-				"containerId", req.ContainerId,
+				"containerID", req.ContainerID,
 			)
 			return &pb.ContainerActionResponse{
-				CommandId:   req.CommandId,
-				ContainerId: req.ContainerId,
+				CommandID:   req.CommandID,
+				ContainerID: req.ContainerID,
 				Success:     false,
 				Message:     fmt.Sprintf("Failed to stop container (graceful: %v, force: %v)", err, killErr),
 			}, nil
@@ -121,13 +121,13 @@ func (h *CommandHandler) StopContainer(ctx context.Context, req *pb.StopContaine
 	}
 
 	h.logger.Info("Container stopped successfully",
-		"commandId", req.CommandId,
-		"containerId", req.ContainerId,
+		"commandID", req.CommandID,
+		"containerID", req.ContainerID,
 	)
 
 	return &pb.ContainerActionResponse{
-		CommandId:   req.CommandId,
-		ContainerId: req.ContainerId,
+		CommandID:   req.CommandID,
+		ContainerID: req.ContainerID,
 		Success:     true,
 		Message:     "Container stopped successfully",
 	}, nil
@@ -136,8 +136,8 @@ func (h *CommandHandler) StopContainer(ctx context.Context, req *pb.StopContaine
 // GetContainerLogs streams container logs back to the Control Plane.
 func (h *CommandHandler) GetContainerLogs(req *pb.GetContainerLogsRequest, stream pb.HostAgentService_GetContainerLogsServer) error {
 	h.logger.Info("Received GetContainerLogs request",
-		"hostId", req.HostId,
-		"containerId", req.ContainerId,
+		"hostID", req.HostID,
+		"containerID", req.ContainerID,
 		"follow", req.Follow,
 		"tail", req.Tail,
 	)
@@ -148,7 +148,7 @@ func (h *CommandHandler) GetContainerLogs(req *pb.GetContainerLogsRequest, strea
 	}
 
 	ctx := stream.Context()
-	reader, err := h.dockerClient.GetContainerLogs(ctx, req.ContainerId, &docker.LogsOptions{
+	reader, err := h.dockerClient.GetContainerLogs(ctx, req.ContainerID, &docker.LogsOptions{
 		Follow: req.Follow,
 		Tail:   tail,
 		Stdout: true,
@@ -168,7 +168,7 @@ func (h *CommandHandler) GetContainerLogs(req *pb.GetContainerLogsRequest, strea
 			n, readErr := reader.Read(buf)
 			if n > 0 {
 				entry := &pb.ContainerLogEntry{
-					ContainerId: req.ContainerId,
+					ContainerID: req.ContainerID,
 					Data:        make([]byte, n),
 					Stream:      "stdout",
 				}

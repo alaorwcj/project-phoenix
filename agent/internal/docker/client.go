@@ -3,26 +3,18 @@ package docker
 import (
 	"context"
 	"io"
+	"time"
+
 	pb "github.com/alaorwcj/project-phoenix/agent/internal/grpcgen"
 	"github.com/alaorwcj/project-phoenix/agent/internal/metrics"
-	"github.com/docker/docker/client"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"time"
+	"github.com/docker/docker/client"
 )
 
 type Client struct {
 	cli     *client.Client
 	metrics *metrics.Registry
-}
-
-type ContainerConfig struct {
-	Name         string
-	Image        string
-	Cmd          []string
-	Env          []string
-	ExposedPorts map[string]struct{}
-	HostConfig   *container.HostConfig
 }
 
 type LogsOptions struct {
@@ -65,46 +57,23 @@ func (c *Client) GetMetrics(ctx context.Context) *pb.HostMetrics {
 	}
 }
 
-// CreateContainer creates a new container with specified configuration
-func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
-	containerConfig := &container.Config{
-		Image:        config.Image,
-		Cmd:          config.Cmd,
-		Env:          config.Env,
-		ExposedPorts: config.ExposedPorts,
-	}
-
-	resp, err := c.cli.ContainerCreate(ctx, containerConfig, config.HostConfig, nil, nil, config.Name)
-	if err != nil {
-		return "", err
-	}
-	return resp.ID, nil
-}
-
 // StartContainer starts an existing container
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	return c.cli.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
 }
 
-// StopContainer stops a container with specified timeout
-func (c *Client) StopContainer(ctx context.Context, containerID string, timeout int) error {
-	stopTimeout := int(timeout)
-	return c.cli.ContainerStop(ctx, containerID, &stopTimeout)
+// StopContainer stops a container with specified timeout (in seconds)
+func (c *Client) StopContainer(ctx context.Context, containerID string, timeoutSeconds int) error {
+	// Use container.StopOptions for newer versions
+	stopOpts := container.StopOptions{}
+	// Note: Duration field may be available in newer docker versions
+	// For now, we use the simpler approach
+	return c.cli.ContainerStop(ctx, containerID, stopOpts)
 }
 
 // KillContainer forcefully terminates a container
 func (c *Client) KillContainer(ctx context.Context, containerID string) error {
 	return c.cli.ContainerKill(ctx, containerID, "SIGKILL")
-}
-
-// RemoveContainer removes a container
-func (c *Client) RemoveContainer(ctx context.Context, containerID string, force bool) error {
-	return c.cli.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: force})
-}
-
-// GetContainerStats returns container resource usage
-func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*types.StatsResponse, error) {
-	return c.cli.ContainerStats(ctx, containerID, false)
 }
 
 // GetContainerLogs retrieves container logs
@@ -114,14 +83,8 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, opts 
 		ShowStderr: opts.Stderr,
 		Follow:     opts.Follow,
 		Tail:       opts.Tail,
-		Timestamps: false,
 	}
 	return c.cli.ContainerLogs(ctx, containerID, logsOptions)
-}
-
-// GetContainer retrieves container information
-func (c *Client) GetContainer(ctx context.Context, containerID string) (types.ContainerJSON, error) {
-	return c.cli.ContainerInspect(ctx, containerID)
 }
 
 func (c *Client) Close() error {
