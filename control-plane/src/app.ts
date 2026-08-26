@@ -7,6 +7,7 @@ import { setupJobRoutes } from './routes/jobs';
 import { GrpcServer } from './lib/grpcServer';
 import { initializeJobQueue, closeJobQueue } from './lib/jobQueue';
 import { registerJobHandlers } from './lib/jobHandlers';
+import { evaluateHostHealth, reconcileFreshHosts } from './lib/hostHealth';
 import { getLogger, setAppLogger, type StructuredLogger } from './lib/logger';
 import { getMetricsText, metricsContentType, observeHttpRequest } from './lib/metrics';
 import {
@@ -65,6 +66,23 @@ export async function buildApp() {
 
   grpcServer = new GrpcServer(env.GRPC_PORT);
 
+  // Start periodic host-health evaluator: marks stale agents OFFLINE so the
+  // scheduler and capacity check stop trusting them. Runs every 30s.
+  const healthInterval = setInterval(() => {
+    evaluateHostHealth()
+      .then((summary) => {
+        if (summary.stale > 0) {
+          getLogger({ component: 'host-health' }).warn({ summary }, 'Host health sweep completed');
+        }
+      })
+      .catch((err) => getLogger({ component: 'host-health' }).error({ err }, 'Health sweep failed'));
+    reconcileFreshHosts().catch((err) =>
+      getLogger({ component: 'host-health' }).error({ err }, 'Fresh-host reconciliation failed')
+    );
+  }, 30_000);
+  // Don't keep the event loop alive solely for this timer.
+  if (typeof healthInterval.unref === 'function') healthInterval.unref();
+
   app.setErrorHandler(async (error, request, reply) => {
     const log = request.log as unknown as StructuredLogger;
     if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
@@ -75,6 +93,7 @@ export async function buildApp() {
   });
 
   app.addHook('onClose', async () => {
+    clearInterval(healthInterval);
     await closeJobQueue();
     await grpcServer?.stop();
   });
