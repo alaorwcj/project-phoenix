@@ -162,10 +162,10 @@ This document outlines the remaining work to build out the Docker Platform multi
 - ✅ `agent/cmd/agent/main.go`: Pass TLS config to client
 
 ### 7.4 Integration Tests 🔄
-- [ ] `__tests__/grpc-mtls.test.ts`: mTLS server/client tests
-- [ ] Test certificate validation
-- [ ] Test certificate rejection scenarios
-- [ ] Performance benchmarks
+- [ ] `__tests__/grpc-mtls.test.ts`: mTLS server/client tests (requires Go runtime)
+- [x] Control Plane HTTP route integration tests (`api-routes.test.ts`)
+- [x] Prisma repository tests (`repository.test.ts`)
+- [x] Service layer unit tests (`services.test.ts`)
 
 ### 7.5 Documentation ✅
 - ✅ `docs/PHASE_7_MTLS.md`: Complete guide
@@ -430,11 +430,15 @@ This document outlines the remaining work to build out the Docker Platform multi
 - Validation logic
 - Type safety (Go interfaces)
 
-### Integration Tests (Test Suite)
+### Integration Tests (Test Suite) ✅
 - End-to-end flows (registration → container start)
 - Multi-tenant isolation
 - Authentication/RBAC
 - Database consistency
+- **API route tests** — `control-plane/src/__tests__/api-routes.test.ts` covers public endpoints, auth, RBAC enforcement (VIEWER/OPERATOR/ADMIN), host/container CRUD with pagination, container start/stop, usage summaries, and trace context headers
+- **Repository tests** — `control-plane/src/__tests__/repository.test.ts` covers Prisma data access for Host, Container, User, and Environment models with multi-tenant filtering
+- **Service tests** — `control-plane/src/__tests__/services.test.ts` covers business logic in ContainerService, HostService, and EnvironmentService including cross-tenant isolation guarantees
+- **Runner** — `control-plane/vitest.config.ts` (forks pool, no isolation, 30s timeouts) with `npm test`, `npm run test:watch`, `npm run test:coverage` scripts
 
 ### Performance Tests (Before Release)
 - Load testing (containers/sec)
