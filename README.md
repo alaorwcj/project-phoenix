@@ -1,380 +1,233 @@
-# Docker Platform - Multi-Tenant Container Orchestration
+# 🐳 Docker Platform — Multi-Tenant Container Orchestration
 
-Plataforma centralizada para orquestração, monitoramento e gerenciamento de hosts, containers e serviços Docker com arquitetura multi-tenant, autenticação JWT, RBAC e comunicação gRPC bidirecional.
+[![PR #10](https://img.shields.io/badge/PR-%2310-merged-6e40c9)](https://github.com/alaorwcj/project-phoenix/pull/10)
+[![Phases](https://img.shields.io/badge/Phases-1%2F12%20Complete-brightgreen)](ROADMAP.md)
+[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
-## ⚡ Status de Implementação
+A centralized platform for multi-tenant Docker container orchestration, monitoring, and management with gRPC communication, mTLS security, and production-ready infrastructure.
 
-| Componente | Status | Detalhes |
-|-----------|--------|----------|
-| **REST API** | ✅ Completo | JWT auth, RBAC (ADMIN/OPERATOR/VIEWER), multi-tenant isolation |
-| **gRPC Server** | ✅ Completo | RegisterHost, Heartbeat, Container ops (stubs) |
-| **Proto Types** | ✅ Completo | TypeScript e Go (manual, sem protoc) |
-| **Go Agent** | ✅ Completo | Config, Docker client (extended), gRPC client, heartbeat loop |
-| **Database** | ✅ Completo | Tenant, User, Environment, Host, Container, ContainerLog, Job models |
-| **Container Operations** | ✅ Fase 5 | StartContainer, StopContainer, GetContainerLogs com lifecycle tracking |
-| **Job Queue** | ✅ Fase 6 | Bull + Redis para async operations com retry e progress tracking |
-| **Integration Tests** | ✅ Completo | Tenants, hosts, containers, job queue, isolation verification |
-
-## 🏗️ Arquitetura
+## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│        REST API (Fastify + TypeScript)      │
-│  JWT → RBAC → Handlers → Services → Repos   │
-└────────────────────┬────────────────────────┘
-                     │
-         ┌───────────┴────────────┐
-         ▼                        ▼
-    [REST Routes]          [gRPC Server:50051]
-    (Multi-tenant)         (Host Agent Service)
-         │                        │
-         └───────────┬────────────┘
-                     ▼
-            [Prisma + PostgreSQL]
-      (Tenants, Users, Hosts, Envs)
-                     ▲
-                     │ ◄─────┐
-              ┌──────┴──────┐ │
-              │   Control   │ │
-              │   Plane     │ │
-              └──────┬──────┘ │
-                     │        │
-            ┌────────▼────────┘
-            │
-     ┌──────▼──────────┐
-     │  Host Agent(s)  │
-     │    (Go Binary)  │
-     ├─────────────────┤
-     │  Docker Client  │
-     │  Container Ops  │
-     │  Metrics        │
-     └─────────────────┘
+                          ┌──────────────────────────┐
+                          │   REST API + gRPC Server │
+                          │   (Control Plane)        │
+                          │   Port 3000 / 50051       │
+                          └─────────┬────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+      ┌───────▼───────┐   ┌────────▼────────┐   ┌───────▼───────┐
+      │  Fastify       │   │  gRPC Services  │   │  PostgreSQL   │
+      │  REST Routes   │   │  HostAgent      │   │  Multi-Tenant │
+      └───────┬───────┘   └────────┬────────┘   └───────────────┘
+              │                     │              (tenant_id isolation)
+              │    ┌────────────────┘
+              │    │
+      ┌───────▼────▼──────────────┐
+      │   Host Agent(s)           │
+      │   Go + Docker Engine API  │
+      │   + gRPC Client + mTLS   │
+      └───────────────────────────┘
 ```
 
-## 📁 Estrutura do Projeto
+## What's Included
+
+| Component | Tech | Features |
+|-----------|------|----------|
+| **Control Plane** | Node.js/TypeScript, Fastify, Prisma | JWT auth, RBAC, multi-tenant isolation, pagination |
+| **Host Agent** | Go, Docker SDK, gRPC | Container lifecycle, metrics, health checks |
+| **gRPC** | Protocol Buffers, mTLS | Secure bidirectional communication |
+| **Security** | AES-256-GCM, Zod, rate limiting | Input validation, audit logging, secrets encryption |
+| **Observability** | Pino, Prometheus, distributed tracing | Structured logs, metrics export, request tracing |
+| **Resources** | Bin-packing scheduler, health monitor | Capacity management, failover planning, cost tracking |
+| **Deployment** | Docker, Helm, Prometheus, Grafana | Production configs, backup/restore, alerting |
+
+## Quick Start
+
+```bash
+# Start everything
+docker-compose up -d
+
+# Verify
+curl http://localhost:3000/api/status
+
+# Swagger docs
+open http://localhost:3000/docs
+
+# Authenticate
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@acme.local","password":"admin123456"}'
+```
+
+## Project Structure
 
 ```
 project-phoenix/
-├── control-plane/               # Backend (Node.js/TypeScript + Fastify)
+├── control-plane/              # Node.js/TypeScript
 │   ├── src/
-│   │   ├── app.ts              # Bootstrap REST + gRPC
-│   │   ├── config/             # Env vars, database, JWT secrets
-│   │   ├── middleware/
-│   │   │   ├── auth.ts         # JWT Bearer token validation
-│   │   │   └── rbac.ts         # Role-based access control
-│   │   ├── handlers/
-│   │   │   ├── tenantHandlers.ts
-│   │   │   ├── environmentHandlers.ts
-│   │   │   └── hostHandlers.ts
+│   │   ├── config/             # Environment configuration
+│   │   ├── handlers/           # HTTP request handlers
+│   │   ├── lib/                # Libraries (16 modules)
+│   │   │   ├── audit.ts        # Audit logging
+│   │   │   ├── auth.ts         # JWT + RBAC
+│   │   │   ├── costTracking.ts # Per-tenant billing
+│   │   │   ├── grpcServer.ts   # gRPC server
+│   │   │   ├── hostHealth.ts   # Health monitoring + failover
+│   │   │   ├── logger.ts       # Structured logging
+│   │   │   ├── metrics.ts      # Prometheus metrics
+│   │   │   ├── pagination.ts   # List pagination
+│   │   │   ├── rateLimit.ts    # Rate limiting
+│   │   │   ├── resourceManager.ts # Capacity scheduling
+│   │   │   ├── secrets.ts      # AES-256-GCM encryption
+│   │   │   ├── trace.ts        # Distributed tracing
+│   │   │   ├── tlsConfig.ts    # mTLS configuration
+│   │   │   └── validation.ts   # Zod input validation
+│   │   ├── middleware/          # Auth, tenant isolation
+│   │   ├── repositories/       # Prisma data access
+│   │   ├── routes/             # Route definitions
 │   │   ├── services/           # Business logic
-│   │   ├── repositories/       # Prisma queries + tenant filtering
-│   │   ├── routes/
-│   │   │   └── api.ts          # Route registry with auth/RBAC hooks
-│   │   ├── lib/
-│   │   │   └── grpcServer.ts   # gRPC server (proto loading + handlers)
-│   │   ├── proto/
-│   │   │   └── docker_platform.ts  # Generated TypeScript types
-│   │   └── types/
-│   │       └── auth.ts         # Fastify request augmentation
+│   │   └── __tests__/          # Test suites
 │   ├── prisma/
-│   │   └── schema.prisma       # Multi-tenant data models
-│   └── package.json
-│
-├── agent/                       # Host Agent (Go)
-│   ├── cmd/
-│   │   └── agent/
-│   │       └── main.go         # Agent entry point
+│   │   ├── schema.prisma       # 9 models, 13 audit actions
+│   │   └── migrations/         # 6 migrations
+│   └── Dockerfile
+├── agent/                      # Go
+│   ├── cmd/agent/              # Agent entrypoint
+│   ├── cmd/cli/                # CLI tool (cobra)
 │   ├── internal/
-│   │   ├── config/
-│   │   │   └── config.go       # Env-based configuration
-│   │   ├── docker/
-│   │   │   └── client.go       # Docker Engine API wrapper
-│   │   ├── grpc/
-│   │   │   └── client.go       # gRPC client to Control Plane
-│   │   └── grpcgen/            # Generated proto types
-│   │       ├── types.go        # Message types
-│   │       ├── service.go      # Service interfaces
-│   │       ├── mock_client.go  # Testing support
-│   │       └── http_client.go  # Dev transport (non-gRPC)
-│   ├── go.mod
-│   └── .env.example
-│
-├── proto/
-│   └── docker_platform.proto   # gRPC service contract
-│
-├── docker-compose.yml          # PostgreSQL + development stack
-├── README.md                   # This file
-└── docs/                       # Architecture, API, setup guides
+│   │   ├── cli/                # CLI commands
+│   │   ├── config/             # Configuration
+│   │   ├── docker/             # Docker Engine API
+│   │   ├── grpc/               # gRPC client + mTLS
+│   │   ├── logging/            # Structured logger
+│   │   ├── metrics/            # Prometheus metrics
+│   │   └── trace/              # Distributed tracing
+│   └── Dockerfile
+├── proto/                      # gRPC contracts
+│   └── docker_platform.proto
+├── deploy/
+│   ├── database/               # PostgreSQL config + backup scripts
+│   ├── helm/docker-platform/   # Kubernetes Helm chart
+│   └── monitoring/             # Prometheus + Grafana
+├── scripts/                    # Setup + cert generation
+├── docker-compose.yml          # Full local dev stack
+└── ROADMAP.md                  # Development roadmap
 ```
 
-## 🚀 Quick Start
+## API Reference
 
-### Pré-requisitos
-- Node.js 18+
-- PostgreSQL 16
-- Docker (para agente)
-- Go 1.21+ (para compilar agente)
-
-### Control Plane Setup
+### Authentication
 
 ```bash
-cd control-plane
-
-# 1. Instalar dependências
-npm install
-
-# 2. Configurar banco de dados
-cp .env.example .env
-# Editar .env com conexão PostgreSQL
-
-# 3. Gerar migrations
-npx prisma migrate dev --name init
-
-# 4. Seed data (default tenant + test user)
-npx prisma db seed
-
-# 5. Iniciar servidor
-npm run dev
+# Login (returns JWT)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@acme.local","password":"admin123456"}'
 ```
 
-**REST API**: http://localhost:3000
-**gRPC Server**: localhost:50051
+### Endpoints
 
-### Host Agent Setup
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| GET | `/api/status` | Public | System health |
+| GET | `/api/hosts` | VIEWER | List hosts (paginated) |
+| POST | `/api/hosts/health/sweep` | ADMIN | Health check sweep |
+| GET | `/api/hosts/:id/failover-plan` | ADMIN | Failover analysis |
+| GET | `/api/containers` | VIEWER | List containers (paginated) |
+| POST | `/api/containers` | OPERATOR | Start container |
+| POST | `/api/containers/:id/stop` | OPERATOR | Stop container |
+| GET | `/api/containers/:id/logs` | VIEWER | Stream logs |
+| GET | `/api/usage/summary` | VIEWER | Cost summary |
+| GET | `/docs` | Public | Swagger UI |
+| GET | `/metrics` | Public | Prometheus metrics |
+
+**Pagination**: `?limit=20&offset=0` (default 20, max 500)
+
+### gRPC Services
+
+| RPC | Description |
+|-----|-------------|
+| `RegisterHost` | Agent registration with metadata |
+| `Heartbeat` | Periodic health + metrics report |
+| `StartContainer` | Deploy container to host |
+| `StopContainer` | Graceful shutdown (15s timeout) |
+| `GetContainerLogs` | Stream container logs |
+
+## Development Phases
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 1 | Foundation | ✅ |
+| 2 | gRPC & Proto | ✅ |
+| 3 | Agent Implementation | ✅ |
+| 4 | Database & Testing | ✅ |
+| 5 | Container Operations | ✅ |
+| 6 | Job Queue | ✅ |
+| 7 | Real gRPC + mTLS | ✅ |
+| 8 | Observability | ✅ |
+| 9 | Security Hardening | ✅ |
+| 10 | Resource Management | ✅ |
+| 11 | UI & Developer Experience | ✅ |
+| 12 | Production Deployment | ✅ |
+
+See [ROADMAP.md](ROADMAP.md) for detailed phase breakdown.
+
+## Security
+
+- **mTLS**: Certificate-based authentication between Control Plane and Agents
+- **JWT**: Token-based API authentication with tenant scoping
+- **RBAC**: Three roles (ADMIN, OPERATOR, VIEWER) with hierarchical permissions
+- **Encryption**: AES-256-GCM for secrets at rest
+- **Rate Limiting**: Per-tenant (10 ops/min) and per-user (100 writes/min, 500 reads/min)
+- **Audit Logging**: All operations tracked with who/what/when/result
+- **Input Validation**: Zod schemas for all API inputs
+
+## Deployment
+
+### Local (Docker Compose)
 
 ```bash
-cd agent
-
-# 1. Configurar ambiente
-cp .env.example .env
-# Editar .env:
-#   CONTROL_PLANE_ADDR=localhost:50051
-#   AGENT_ID=agent-001
-#   DOCKER_HOST=unix:///var/run/docker.sock
-
-# 2. Compilar (requer Go)
-go build -o bin/agent ./cmd/agent
-
-# 3. Executar
-./bin/agent
+docker-compose up -d
 ```
 
-## 🔐 Autenticação & Autorização
+### Kubernetes (Helm)
 
-### JWT Token Structure
-```typescript
-{
-  sub: "user-id",          // User identifier
-  tenantId: "tenant-id",   // Tenant organization
-  role: "ADMIN",           // Role: ADMIN | OPERATOR | VIEWER
-  iat: 1234567890,
-  exp: 1234571490
-}
-```
-
-### RBAC Hierarchy
-```
-ADMIN (1)     ≥ (can perform any action)
-OPERATOR (2)  ≥ (can manage containers)
-VIEWER (3)    ≥ (read-only access)
-```
-
-### Exemplo de Requisição Autenticada
 ```bash
-curl -H "Authorization: Bearer $JWT_TOKEN" \
-  http://localhost:3000/api/tenants
+cd deploy/helm/docker-platform
+helm install docker-platform . -n docker-platform --create-namespace
 ```
 
-## 📡 gRPC Contrato (docker_platform.proto)
+### Production Checklist
 
-### Serviço: HostAgentService
+- [ ] PostgreSQL 16+ with `deploy/database/postgresql-production.conf`
+- [ ] TLS certificates for gRPC (`scripts/generate-certs.sh`)
+- [ ] Prometheus scraping `/metrics` endpoints
+- [ ] Grafana dashboard imported from `deploy/monitoring/grafana-dashboard.json`
+- [ ] Backup schedule configured (`deploy/database/backup.sh`)
+- [ ] Alert rules active (`deploy/monitoring/prometheus-alerts.yaml`)
 
-| RPC | Request | Response | Status |
-|-----|---------|----------|--------|
-| **RegisterHost** | RegisterHostRequest | RegisterHostResponse | ✅ Impl |
-| **Heartbeat** | HeartbeatRequest | HeartbeatResponse | ✅ Impl |
-| **StartContainer** | StartContainerRequest | ContainerActionResponse | ✅ Phase 5 |
-| **StopContainer** | StopContainerRequest | ContainerActionResponse | ✅ Phase 5 |
-| **GetContainerLogs** | GetContainerLogsRequest | stream ContainerLogEntry | ✅ Phase 5 |
-| **Job Queue** | - | - | ✅ Phase 6 |
+## Test Credentials
 
-### Mensagens Principais
+| Email | Password | Role |
+|-------|----------|------|
+| admin@acme.local | admin123456 | ADMIN |
+| operator@acme.local | operator123456 | OPERATOR |
+| viewer@acme.local | viewer123456 | VIEWER |
 
-**RegisterHostRequest**
-```protobuf
-{
-  agent_id: string           // Unique agent identifier
-  hostname: string           // Host name
-  docker_version: string     // Docker version
-  operating_system: string   // OS (linux, windows, darwin)
-  architecture: string       // CPU arch (amd64, arm64)
-  labels: map<string, string>
-}
-```
+## Contributing
 
-**HeartbeatRequest**
-```protobuf
-{
-  host_id: string
-  agent_id: string
-  metrics: HostMetrics       // CPU, memory, containers
-  observed_at: Timestamp
-}
-```
+1. Create feature branch: `git checkout -b phase/X-description`
+2. Follow Clean Architecture (handlers → services → repositories)
+3. Add tests for new functionality
+4. Run `npx tsc --noEmit` before committing
+5. Commit with descriptive message + `Co-authored-by` trailer
+6. Open PR against `main`
 
-**HostMetrics**
-```protobuf
-{
-  cpu_percent: double
-  memory_used_bytes: uint64
-  memory_total_bytes: uint64
-  running_containers: uint32
-}
-```
+## References
 
-## 🔄 Fluxo de Comunicação
-
-### Host Registration
-```
-1. Agent startup
-   └─> Agent.RegisterHost(agentId, hostname, dockerVersion)
-       └─> ControlPlane.gRPC.RegisterHost()
-           ├─> Create Host record (status=PENDING)
-           └─> Return hostId, tenantId
-2. Agent stores hostId for future heartbeats
-```
-
-### Heartbeat Loop
-```
-1. Agent starts ticker (default: 30s interval)
-2. Every tick:
-   └─> GetMetrics() from Docker daemon
-       └─> SendHeartbeat(hostId, metrics, timestamp)
-           └─> ControlPlane.gRPC.Heartbeat()
-               ├─> Update lastHeartbeat timestamp
-               ├─> Update status to ONLINE
-               ├─> Store metrics JSON
-               └─> Return pending commands (if any)
-3. Agent processes pending commands (TODO: job queue)
-```
-
-## 🗄️ Database Schema
-
-### Tabelas Multi-Tenant
-
-```sql
--- Organizações
-CREATE TABLE Tenant (
-  id UUID PRIMARY KEY,
-  name STRING,
-  created_at TIMESTAMP
-);
-
--- Usuários por tenant
-CREATE TABLE User (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES Tenant,
-  email STRING UNIQUE(tenant_id, email),
-  password_hash STRING,
-  role ENUM(ADMIN, OPERATOR, VIEWER),
-  UNIQUE(tenant_id, email)
-);
-
--- Ambientes (Dev, Staging, Prod)
-CREATE TABLE Environment (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES Tenant,
-  name STRING,
-  slug STRING UNIQUE(tenant_id, slug),
-  description TEXT,
-  variables JSON -- Env vars per environment
-);
-
--- Hosts registrados (servidores com Docker)
-CREATE TABLE Host (
-  id UUID PRIMARY KEY,
-  tenant_id UUID REFERENCES Tenant,
-  agent_id STRING UNIQUE(tenant_id, agent_id),
-  hostname STRING,
-  status ENUM(PENDING, ONLINE, OFFLINE),
-  docker_version STRING,
-  last_heartbeat TIMESTAMP,
-  metadata JSON -- OS, arch, labels
-);
-```
-
-**Princípio Multi-Tenant**: Todas as queries filtram por `tenant_id` derivado do JWT. FK constraints garantem integridade referencial.
-
-## ⚠️ Itens Pendentes
-
-### 1. **Protoc Code Generation** (BLOQUEADOR)
-```bash
-# Node.js (TypeScript)
-protoc --ts_proto_out=./control-plane/src/proto \
-  --plugin=protoc-gen-ts_proto=./control-plane/node_modules/.bin/protoc-gen-ts_proto \
-  ./proto/docker_platform.proto
-
-# Go
-protoc --go_out=. --go-grpc_out=. ./proto/docker_platform.proto
-```
-**Status**: Tipos manuais criados como workaround; protoc Windows issues pendentes
-
-### 2. **Database Migration**
-```bash
-cd control-plane
-npx prisma migrate dev --name init
-```
-**Status**: Schema pronto; migration não criada
-
-### 3. **Agent Authentication** (Segurança)
-- Atual: agentId como identificador opaco
-- TODO: mTLS + JWT token entre agent ↔ control-plane
-
-### 4. **Container Operation Queueing** (Funcional)
-- StartContainer/StopContainer: stubs apenas
-- TODO: Redis job queue com retry logic
-
-### 5. **Metrics Aggregation** (Analytics)
-- Heartbeat armazena JSON bruto
-- TODO: Time-series database (InfluxDB/TimescaleDB) para analytics
-
-### 6. **Integration Tests** (QA)
-```bash
-npm run test:integration
-```
-- Verificar fluxo completo: registration → heartbeat → container ops
-
-## 📊 Evolução Histórica
-
-| PR | Título | Commits | Status |
-|----|--------|---------|--------|
-| #1 | Platform Foundation + proto contracts | 2 | ✅ Merged |
-| #3 | Foundation rebase | - | ✅ Merged |
-| #4 | REST API + JWT + RBAC | 1 | ✅ Merged |
-| #5 | Go Host Agent | 1 | ✅ Merged |
-| #6 | gRPC Server Implementation | 1 | ✅ Merged |
-| #7 | Proto Types Generation | 1 | ✅ Merged |
-| #9 | Phase 4-5-6: Database, Containers, Job Queue | 2 | 🔄 Open |
-
-## 🔗 Referências
-
-- [Prisma Multi-Tenancy Pattern](https://www.prisma.io/docs/concepts/components/prisma-schema/multi-tenancy)
+- [Prisma Multi-Tenancy](https://www.prisma.io/docs/concepts/components/prisma-schema/multi-tenancy)
 - [gRPC Go Quickstart](https://grpc.io/docs/languages/go/quickstart/)
 - [Docker Engine API](https://docs.docker.com/engine/api/)
-- [JWT Best Practices](https://tools.ietf.org/html/rfc7519)
-
-## 📝 Notas de Desenvolvimento
-
-### Local Testing (sem Docker)
-1. Mock gRPC client em `agent/internal/grpcgen/mock_client.go`
-2. HTTP adapter em `agent/internal/grpcgen/http_client.go` para dev
-
-### Production Deployment (TODO)
-1. mTLS certificates para gRPC
-2. JWT secret rotation
-3. Database encrypted backups
-4. Agent autoscaling via Kubernetes
-
-## 📧 Contato
-
-Para questões sobre arquitetura ou contribuições, abra uma issue ou PR.
+- [Fastify Documentation](https://www.fastify.io/docs/)
