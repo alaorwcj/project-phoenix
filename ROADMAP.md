@@ -298,12 +298,13 @@ This document outlines the remaining work to build out the Docker Platform multi
 - ✅ Config commands:
   - `docker-platform config set/get`
 
-### 11.3 Web Dashboard (Future)
-- [ ] React frontend
-- [ ] Tenant admin console
-- [ ] Container management UI
-- [ ] Metrics/logs dashboard
-- [ ] User management
+### 11.3 Web Dashboard ✅
+- ✅ React frontend (Vite + TypeScript + Tailwind CSS)
+- ✅ Tenant admin console (protected routes, Layout shell)
+- ✅ Container management UI (start/stop, pagination)
+- ✅ Hosts dashboard (card grid, status indicators)
+- ✅ User management (admin-only table)
+- ✅ Login page with JWT auth (Zustand store, Axios interceptors)
 
 ---
 
