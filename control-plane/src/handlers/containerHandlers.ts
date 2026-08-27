@@ -10,6 +10,8 @@ import { writeAuditLog } from '../lib/audit';
 import { checkResourceAllocation } from '../lib/resourceManager';
 import { recordContainerStart, recordContainerStop } from '../lib/costTracking';
 import { parsePaginationParams, buildPaginatedResponse } from '../lib/pagination';
+import { getGrpcAgentClient } from '../lib/grpcAgentClient';
+import { getAgentRegistry } from '../lib/agentRegistry';
 
 const containerService = createContainerService();
 const prisma = new PrismaClient();
@@ -276,5 +278,85 @@ export async function listContainersHandler(request: FastifyRequest, reply: Fast
   } catch (error) {
     (request.log as unknown as StructuredLogger).error({ err: error }, 'Error listing containers');
     return reply.status(500).send({ error: (error as Error).message || 'Failed to list containers' });
+  }
+}
+
+export async function getContainerLogsHandler(request: FastifyRequest, reply: FastifyReply) {
+  try {
+    const { tenantId } = request.user as any;
+    const { id } = request.params as { id: string };
+    const { tail, follow, timestamps } = request.query as {
+      tail?: string;
+      follow?: string;
+      timestamps?: string;
+    };
+
+    if (!id) {
+      return reply.status(400).send({ error: 'Container ID required' });
+    }
+
+    // Verify container belongs to tenant
+    const container = await containerService.getContainer(tenantId, id);
+
+    // Resolve agent connection info
+    const registry = getAgentRegistry();
+    const agent = await registry.getAgent(container.hostId);
+
+    if (!agent) {
+      // Fall back to stored logs from the database when agent is offline
+      const storedLogs = await prisma.containerLog.findMany({
+        where: { containerId: id, tenantId },
+        orderBy: { timestamp: 'asc' },
+        take: tail ? parseInt(tail, 10) : 100,
+      });
+
+      return reply.status(200).send({
+        source: 'database',
+        containerId: id,
+        logs: storedLogs.map((log) => ({
+          timestamp: log.timestamp,
+          stream: log.stream,
+          data: log.data.toString('utf8'),
+        })),
+      });
+    }
+
+    // Stream live logs from the agent via gRPC
+    const agentClient = getGrpcAgentClient();
+    const logStream = agentClient.getContainerLogs(container.hostId, agent.grpcAddress, {
+      host_id: container.hostId,
+      container_id: id,
+      follow: follow === 'true',
+      timestamps: timestamps === 'true',
+      tail: tail ? parseInt(tail, 10) : 100,
+    });
+
+    // Set up newline-delimited JSON streaming response
+    reply.raw.setHeader('Content-Type', 'application/x-ndjson');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+
+    for await (const entry of logStream) {
+      const line = JSON.stringify({
+        containerId: entry.container_id,
+        timestamp: entry.timestamp,
+        stream: entry.stream,
+        data: Buffer.isBuffer(entry.data) ? entry.data.toString('utf8') : entry.data,
+      });
+      reply.raw.write(line + '\n');
+    }
+
+    reply.raw.end();
+    return reply;
+  } catch (error) {
+    (request.log as unknown as StructuredLogger).error({ err: error }, 'Error getting container logs');
+
+    if ((error as Error).message.includes('not found')) {
+      return reply.status(404).send({ error: 'Container not found' });
+    }
+
+    if (!reply.sent) {
+      return reply.status(500).send({ error: (error as Error).message || 'Failed to get container logs' });
+    }
+    return reply;
   }
 }

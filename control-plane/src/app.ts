@@ -9,6 +9,7 @@ import { setupJobRoutes } from './routes/jobs';
 import { GrpcServer } from './lib/grpcServer';
 import { initializeJobQueue, closeJobQueue } from './lib/jobQueue';
 import { registerJobHandlers } from './lib/jobHandlers';
+import { initializeGrpcAgentClient, closeGrpcAgentClient } from './lib/grpcAgentClient';
 import { evaluateHostHealth, reconcileFreshHosts } from './lib/hostHealth';
 import { getLogger, setAppLogger, type StructuredLogger } from './lib/logger';
 import { getMetricsText, metricsContentType, observeHttpRequest } from './lib/metrics';
@@ -92,6 +93,7 @@ export async function buildApp() {
     requestStarts.delete(request as unknown as object);
   });
 
+  await initializeGrpcAgentClient();
   await initializeJobQueue();
   await registerJobHandlers();
 
@@ -129,6 +131,7 @@ export async function buildApp() {
   app.addHook('onClose', async () => {
     clearInterval(healthInterval);
     await closeJobQueue();
+    await closeGrpcAgentClient();
     await grpcServer?.stop();
   });
 

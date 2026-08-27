@@ -80,6 +80,18 @@ services:
       control-plane:
         condition: service_healthy
 
+  # Web Dashboard — React SPA served by nginx
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: docker-platform-dashboard
+    ports:
+      - "8080:80"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

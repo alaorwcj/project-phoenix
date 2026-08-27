@@ -52,7 +52,10 @@ func NewClient(addr, agentID string, tlsConfig *TLSConfig, reg *metrics.Registry
 	}
 
 	// Create gRPC client stub
-	grpcClient := pb.NewHostAgentServiceClient(conn)
+	// NOTE: pb.NewHostAgentServiceClient does not exist in manually-generated grpcgen types.
+	// Use HTTPHostAgentServiceClient for development (HTTP+JSON adapter).
+	// In production with real protoc-gen-go-grpc, replace with: pb.NewHostAgentServiceClient(conn)
+	grpcClient := pb.NewHTTPHostAgentServiceClient(addr)
 
 	return &Client{
 		conn:    conn,
